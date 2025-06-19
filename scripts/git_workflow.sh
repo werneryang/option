@@ -1,9 +1,6 @@
 #!/bin/bash
-"""
-Git Workflow Automation Script
-
-Provides simple commands for common Git operations with automation.
-"""
+# Git Workflow Automation Script
+# Provides simple commands for common Git operations with automation.
 
 set -e
 

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Quick Git Workflow Wrapper
+exec ./scripts/git_workflow.sh "$@"

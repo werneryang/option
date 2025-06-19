@@ -18,8 +18,8 @@ def render():
     
     # Get data service and selected symbol
     data_service = st.session_state.get('data_service')
-    selected_symbol = st.session_state.get('selected_symbol', 'AAPL')
-    risk_free_rate = st.session_state.get('risk_free_rate', 0.05)
+    selected_symbol = st.session_state.get('symbol_selector', 'AAPL')
+    risk_free_rate = st.session_state.get('risk_free_rate_slider', 5.0) / 100.0
     
     if not data_service:
         st.error("Data service not available")

@@ -18,7 +18,7 @@ def render():
     
     # Get data service and selected symbol
     data_service = st.session_state.get('data_service')
-    selected_symbol = st.session_state.get('selected_symbol', 'AAPL')
+    selected_symbol = st.session_state.get('symbol_selector', 'AAPL')
     
     if not data_service:
         st.error("Data service not available")

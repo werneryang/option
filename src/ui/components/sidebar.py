@@ -40,15 +40,19 @@ def render_sidebar() -> str:
         else:
             available_symbols = ['AAPL', 'SPY', 'TSLA']
         
+        # Ensure we have a valid default selection
+        default_index = 0
+        if 'AAPL' in available_symbols:
+            default_index = available_symbols.index('AAPL')
+        
         selected_symbol = st.selectbox(
             "Select Symbol:",
             available_symbols,
-            index=0 if 'AAPL' in available_symbols else 0,
+            index=default_index,
             key="symbol_selector"
         )
         
-        # Update session state
-        st.session_state.selected_symbol = selected_symbol
+        # Note: selected_symbol is automatically managed by widget key
         
         # Symbol info
         if data_service and selected_symbol:
@@ -73,10 +77,8 @@ def render_sidebar() -> str:
             value=5.0,
             step=0.1,
             format="%.1f%%",
-            key="risk_free_rate"
+            key="risk_free_rate_slider"
         ) / 100.0
-        
-        st.session_state.risk_free_rate = risk_free_rate
         
         # Data refresh
         if st.button("🔄 Refresh Data", help="Clear cache and reload data"):

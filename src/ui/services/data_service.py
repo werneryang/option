@@ -48,6 +48,14 @@ class DataService:
     
     def get_symbol_info(self, symbol: str) -> Dict:
         """Get detailed information about a symbol"""
+        if not symbol:
+            return {
+                'symbol': 'Unknown',
+                'name': 'Unknown',
+                'sector': 'Unknown',
+                'market_cap': None,
+                'is_active': True
+            }
         try:
             symbol_obj = self.db.get_symbol(symbol)
             if symbol_obj:
@@ -71,6 +79,8 @@ class DataService:
     
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Get the most recent price for a symbol"""
+        if not symbol:
+            return None
         try:
             price_history = self.storage.load_price_history(symbol)
             if price_history is not None and len(price_history) > 0:
@@ -81,6 +91,8 @@ class DataService:
     
     def get_price_history(self, symbol: str, days: int = 30) -> Optional[pd.DataFrame]:
         """Get price history for a symbol"""
+        if not symbol:
+            return None
         try:
             end_date = date.today()
             start_date = end_date - timedelta(days=days)
@@ -91,6 +103,8 @@ class DataService:
     
     def get_option_chain(self, symbol: str, target_date: Optional[date] = None) -> Optional[pd.DataFrame]:
         """Get option chain data for a symbol"""
+        if not symbol:
+            return None
         try:
             if target_date is None:
                 # Get most recent date with data

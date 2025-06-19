@@ -56,12 +56,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def initialize_session_state():
-    """Initialize session state variables"""
+    """Initialize session state variables - only non-widget variables"""
     if 'data_service' not in st.session_state:
         st.session_state.data_service = DataService()
-    
-    if 'selected_symbol' not in st.session_state:
-        st.session_state.selected_symbol = 'AAPL'
     
     if 'current_strategy' not in st.session_state:
         st.session_state.current_strategy = None

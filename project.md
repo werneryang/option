@@ -3,7 +3,7 @@
 ## Project Overview
 A comprehensive options analysis platform focused on historical data analysis and strategy evaluation. Built with Python, Streamlit, SQLite, and Parquet for efficient data storage and analysis.
 
-## Current Status: Phase 4 Complete - Production Ready Platform
+## Current Status: Phase 4 Enhanced - Production Ready Platform with Multiple UI Options
 
 ### ✅ Phase 1 Complete: Foundation & Data Infrastructure
 **Duration**: [Completed]
@@ -84,16 +84,19 @@ A comprehensive options analysis platform focused on historical data analysis an
 ### Phase 3 Status: **SKIPPED**
 Strategy Builder & P&L Engine functionality was implemented as part of Phase 2 analytics engine.
 
-### ✅ Phase 4 Complete: User Interface & Visualization
-**Duration**: [Completed - Full Implementation]
-**Status**: Production-ready Streamlit web application
+### ✅ Phase 4 Enhanced: User Interface & Visualization
+**Duration**: [Completed - Multiple UI Options Available]
+**Status**: Production-ready platform with full-featured and simplified interfaces
 
 #### Completed Features:
-- [x] **Streamlit Web Application**: Complete multi-page interface with navigation
+- [x] **Full Streamlit Web Application**: Complete multi-page interface with navigation
 - [x] **Dashboard Page**: Overview with metrics, price charts, and quick actions
 - [x] **Option Chain Page**: Interactive option chain display with Greeks and filtering
 - [x] **Strategy Builder**: Visual strategy construction with real-time P&L analysis
 - [x] **Analytics Page**: Advanced volatility analysis and performance metrics
+- [x] **Ultra Simple UI**: Minimal Streamlit interface focused on option chain display
+- [x] **Command Line UI**: Text-based option chain with interactive mode
+- [x] **Session State Management**: Fixed Streamlit widget conflicts and state handling
 - [x] **Data Service Layer**: Clean interface between UI and backend analytics
 - [x] **Interactive Visualizations**: Plotly charts for P&L, Greeks, and volatility
 - [x] **Export Functionality**: CSV download capabilities
@@ -103,9 +106,12 @@ Strategy Builder & P&L Engine functionality was implemented as part of Phase 2 a
 - **Framework**: Streamlit with multi-page architecture
 - **Visualization**: Plotly for interactive charts and graphs
 - **Data Integration**: Seamless connection to analytics engine
+- **Session Management**: Proper widget key management without conflicts
+- **Null Safety**: Defensive programming for uninitialized widget states
+- **Multiple Interfaces**: Full UI, simplified UI, and command-line options
 - **Caching**: Efficient data caching for performance
 - **Error Handling**: Comprehensive error handling and user feedback
-- **Launch Script**: Simple `python run_ui.py` to start application
+- **Launch Scripts**: Multiple entry points for different use cases
 
 ## Development Notes
 
@@ -127,14 +133,45 @@ Strategy Builder & P&L Engine functionality was implemented as part of Phase 2 a
 1. **Install Dependencies**: `pip install -r requirements.txt`
 2. **Setup Database**: `python main.py setup`
 3. **Download Data**: `python main.py download` (requires IB TWS)
-4. **Launch UI**: `python run_ui.py`
-5. **Access**: Open browser to `http://localhost:8501`
+4. **Choose Interface**: Select your preferred interface below
 
-### 🎯 Application Features
-- **Dashboard**: Real-time overview and key metrics
-- **Option Chain**: Interactive analysis with Greeks calculations
-- **Strategy Builder**: Visual strategy construction and P&L analysis
-- **Analytics**: Advanced volatility and performance analysis
+### 🎯 Multiple Interface Options
+
+#### **Full-Featured Web UI**
+```bash
+python run_ui.py
+# Access: http://localhost:8501
+```
+**Features**: Dashboard, Option Chain, Strategy Builder, Analytics
+
+#### **Simplified Web UI** 
+```bash
+python -m streamlit run ultra_simple_ui.py --server.port 8505
+# Access: http://localhost:8505
+```
+**Features**: Basic option chain, Greeks, CSV export
+
+#### **Command Line Interface**
+```bash
+# Basic display
+python simple_option_chain.py
+
+# Interactive mode
+python simple_option_chain.py interactive
+
+# Specific symbol/days
+python simple_option_chain.py SPY 60
+```
+**Features**: Text-based option chain, interactive commands
+
+#### **Analytics Testing**
+```bash
+# Full analytics test
+python test_analytics.py
+
+# Strategy backtesting
+python test_strategies.py
+```
 
 ### Phase 5: Future Enhancements (Optional)
 - Production deployment and scaling

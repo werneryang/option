@@ -40,11 +40,26 @@ class DataService:
     def get_available_symbols(self) -> List[str]:
         """Get list of symbols with available data"""
         try:
+            # First try database
             symbols = self.db.get_symbols()
-            return [symbol.symbol for symbol in symbols if symbol.is_active]
+            db_symbols = [symbol.symbol for symbol in symbols if symbol.is_active]
+            
+            # Fall back to storage if database is empty
+            if not db_symbols:
+                storage_symbols = self.storage.get_symbols_with_data()
+                if storage_symbols:
+                    logger.info(f"Using storage symbols: {storage_symbols}")
+                    return storage_symbols
+            
+            return db_symbols if db_symbols else ['AAPL', 'SPY', 'TSLA']  # Final fallback
         except Exception as e:
             logger.error(f"Error loading symbols: {e}")
-            return ['AAPL', 'SPY', 'TSLA']  # Fallback
+            # Try storage as fallback
+            try:
+                storage_symbols = self.storage.get_symbols_with_data()
+                return storage_symbols if storage_symbols else ['AAPL', 'SPY', 'TSLA']
+            except:
+                return ['AAPL', 'SPY', 'TSLA']
     
     def get_symbol_info(self, symbol: str) -> Dict:
         """Get detailed information about a symbol"""
@@ -117,6 +132,33 @@ class DataService:
         except Exception as e:
             logger.error(f"Error loading option chain for {symbol}: {e}")
             return None
+    
+    def get_historical_option_chains(self, symbol: str, start_date: date, end_date: date) -> Optional[pd.DataFrame]:
+        """Get historical option chain data for a date range - key method for analysis"""
+        if not symbol:
+            return None
+        try:
+            cache_key = f"historical_chains_{symbol}_{start_date}_{end_date}"
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+            
+            result = self.storage.load_historical_option_chains(symbol, start_date, end_date)
+            if result is not None:
+                self._cache[cache_key] = result
+            return result
+        except Exception as e:
+            logger.error(f"Error loading historical option chains for {symbol}: {e}")
+            return None
+    
+    def get_available_option_dates(self, symbol: str) -> List[date]:
+        """Get list of dates with available option chain data"""
+        if not symbol:
+            return []
+        try:
+            return self.storage.get_available_dates(symbol)
+        except Exception as e:
+            logger.error(f"Error getting available dates for {symbol}: {e}")
+            return []
     
     def calculate_greeks(self, symbol: str, option_data: pd.DataFrame,
                         current_price: float, risk_free_rate: float = 0.05) -> pd.DataFrame:
@@ -228,19 +270,97 @@ class DataService:
             logger.error(f"Error calculating strategy P&L: {e}")
             return None
     
+    def get_iv_analysis(self, symbol: str, start_date: date, end_date: date, 
+                       expiry_days: List[int] = [30, 60, 90]) -> Dict:
+        """Analyze implied volatility trends over time"""
+        try:
+            historical_chains = self.get_historical_option_chains(symbol, start_date, end_date)
+            if historical_chains is None or len(historical_chains) == 0:
+                return {}
+            
+            # Group by date and calculate IV metrics
+            iv_analysis = {}
+            for days in expiry_days:
+                # Filter options close to target expiry
+                target_expiry_min = days - 7
+                target_expiry_max = days + 7
+                
+                filtered_chains = historical_chains[
+                    (historical_chains['days_to_expiry'] >= target_expiry_min) &
+                    (historical_chains['days_to_expiry'] <= target_expiry_max)
+                ].copy() if 'days_to_expiry' in historical_chains.columns else historical_chains.copy()
+                
+                if len(filtered_chains) > 0:
+                    daily_iv = filtered_chains.groupby('data_date')['implied_volatility'].mean()
+                    iv_analysis[f'{days}d_expiry'] = {
+                        'dates': daily_iv.index.tolist(),
+                        'iv_values': daily_iv.values.tolist(),
+                        'avg_iv': daily_iv.mean(),
+                        'iv_std': daily_iv.std()
+                    }
+            
+            return iv_analysis
+        except Exception as e:
+            logger.error(f"Error analyzing IV for {symbol}: {e}")
+            return {}
+    
+    def get_greeks_evolution(self, symbol: str, start_date: date, end_date: date) -> Dict:
+        """Track how Greeks evolved over time for historical analysis"""
+        try:
+            historical_chains = self.get_historical_option_chains(symbol, start_date, end_date)
+            if historical_chains is None or len(historical_chains) == 0:
+                return {}
+            
+            # Calculate daily aggregated Greeks
+            daily_greeks = historical_chains.groupby('data_date').agg({
+                'delta': ['mean', 'sum'],
+                'gamma': ['mean', 'sum'], 
+                'theta': ['mean', 'sum'],
+                'vega': ['mean', 'sum']
+            }).round(4) if all(col in historical_chains.columns for col in ['delta', 'gamma', 'theta', 'vega']) else pd.DataFrame()
+            
+            if len(daily_greeks) > 0:
+                return {
+                    'dates': daily_greeks.index.tolist(),
+                    'delta_avg': daily_greeks[('delta', 'mean')].tolist(),
+                    'gamma_avg': daily_greeks[('gamma', 'mean')].tolist(), 
+                    'theta_avg': daily_greeks[('theta', 'mean')].tolist(),
+                    'vega_avg': daily_greeks[('vega', 'mean')].tolist()
+                }
+            
+            return {}
+        except Exception as e:
+            logger.error(f"Error analyzing Greeks evolution for {symbol}: {e}")
+            return {}
+    
     def get_data_summary(self) -> Dict:
-        """Get summary of available data"""
+        """Get enhanced summary of available data including historical info"""
         try:
             stats = self.storage.get_storage_stats()
             recent_downloads = self.db.get_recent_downloads(days=7)
             
-            return {
+            # Enhanced summary with historical data info
+            summary = {
                 'total_symbols': stats['total_symbols'],
                 'total_files': stats['total_files'],
                 'total_size_mb': stats['total_size_mb'],
                 'recent_downloads': len(recent_downloads),
-                'symbols_with_data': list(stats['symbols'].keys())
+                'symbols_with_data': list(stats['symbols'].keys()),
+                'historical_coverage': {}
             }
+            
+            # Add historical coverage info for each symbol
+            for symbol, symbol_stats in stats['symbols'].items():
+                if 'option_chain_summary' in symbol_stats:
+                    oc_summary = symbol_stats['option_chain_summary']
+                    summary['historical_coverage'][symbol] = {
+                        'option_dates': oc_summary.get('date_count', 0),
+                        'date_range': oc_summary.get('date_range'),
+                        'total_option_records': oc_summary.get('total_records', 0),
+                        'latest_option_date': oc_summary.get('latest_date')
+                    }
+            
+            return summary
         except Exception as e:
             logger.error(f"Error getting data summary: {e}")
             return {
@@ -248,7 +368,8 @@ class DataService:
                 'total_files': 0,
                 'total_size_mb': 0,
                 'recent_downloads': 0,
-                'symbols_with_data': []
+                'symbols_with_data': [],
+                'historical_coverage': {}
             }
     
     def clear_cache(self):

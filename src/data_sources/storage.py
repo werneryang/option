@@ -27,11 +27,16 @@ class ParquetStorage:
         return cache_path / "results.parquet"
     
     def save_option_chain(self, symbol: str, date_obj: date, df: pd.DataFrame) -> Path:
+        """Save option chain for a specific date - supports historical time series"""
         date_str = date_obj.strftime("%Y-%m-%d")
         file_path = self._get_options_path(symbol, date_str)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
         try:
+            # Add timestamp to track when data was collected
+            if 'collected_at' not in df.columns:
+                df['collected_at'] = datetime.now()
+            
             df.to_parquet(
                 file_path,
                 compression=self.compression,
@@ -171,6 +176,57 @@ class ParquetStorage:
         
         return sorted(symbols)
     
+    def load_historical_option_chains(self, symbol: str, start_date: date, end_date: date) -> Optional[pd.DataFrame]:
+        """Load option chains for a date range - key method for historical analysis"""
+        try:
+            available_dates = self.get_available_dates(symbol)
+            target_dates = [d for d in available_dates if start_date <= d <= end_date]
+            
+            if not target_dates:
+                logger.warning(f"No option chain data found for {symbol} between {start_date} and {end_date}")
+                return None
+            
+            combined_dfs = []
+            for target_date in target_dates:
+                df = self.load_option_chain(symbol, target_date)
+                if df is not None:
+                    df['data_date'] = target_date
+                    combined_dfs.append(df)
+            
+            if combined_dfs:
+                result = pd.concat(combined_dfs, ignore_index=True)
+                logger.info(f"Loaded historical option chains for {symbol}: {len(result)} records across {len(target_dates)} dates")
+                return result
+            
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load historical option chains for {symbol}: {e}")
+            return None
+    
+    def get_option_chain_summary(self, symbol: str) -> Dict[str, Any]:
+        """Get summary statistics for option chain data"""
+        try:
+            available_dates = self.get_available_dates(symbol)
+            if not available_dates:
+                return {"symbol": symbol, "date_count": 0, "date_range": None, "total_records": 0}
+            
+            total_records = 0
+            for date_obj in available_dates:
+                df = self.load_option_chain(symbol, date_obj)
+                if df is not None:
+                    total_records += len(df)
+            
+            return {
+                "symbol": symbol,
+                "date_count": len(available_dates),
+                "date_range": (min(available_dates), max(available_dates)),
+                "total_records": total_records,
+                "latest_date": max(available_dates) if available_dates else None
+            }
+        except Exception as e:
+            logger.error(f"Failed to get option chain summary for {symbol}: {e}")
+            return {"symbol": symbol, "date_count": 0, "date_range": None, "total_records": 0}
+    
     def get_storage_stats(self) -> Dict[str, Any]:
         stats = {
             "total_symbols": 0,
@@ -188,7 +244,8 @@ class ParquetStorage:
                 symbol_stats = {
                     "files": 0,
                     "size_mb": 0,
-                    "available_dates": []
+                    "available_dates": [],
+                    "option_chain_summary": {}
                 }
                 
                 for file_path in symbol_dir.rglob("*.parquet"):
@@ -196,6 +253,7 @@ class ParquetStorage:
                     symbol_stats["size_mb"] += file_path.stat().st_size / (1024 * 1024)
                 
                 symbol_stats["available_dates"] = self.get_available_dates(symbol)
+                symbol_stats["option_chain_summary"] = self.get_option_chain_summary(symbol)
                 
                 if symbol_stats["files"] > 0:
                     stats["symbols"][symbol] = symbol_stats

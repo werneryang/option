@@ -143,18 +143,22 @@ def render():
     with col1:
         st.subheader("📋 Quick Actions")
         
-        # Quick strategy builders
-        if st.button("🎯 Analyze Option Chain", use_container_width=True):
-            st.session_state.page_selector = "Option Chain"
-            st.rerun()
+        # Quick strategy builders - using navigation links instead of buttons
+        st.markdown("**Navigate to:**")
         
-        if st.button("🏗️ Build Strategy", use_container_width=True):
-            st.session_state.page_selector = "Strategy Builder"
-            st.rerun()
+        col_nav1, col_nav2, col_nav3 = st.columns(3)
         
-        if st.button("📈 Advanced Analytics", use_container_width=True):
-            st.session_state.page_selector = "Analytics"
-            st.rerun()
+        with col_nav1:
+            if st.button("🎯 Option Chain", use_container_width=True, key="nav_option_chain"):
+                st.info("Use the sidebar to navigate to Option Chain page")
+        
+        with col_nav2:
+            if st.button("🏗️ Strategy Builder", use_container_width=True, key="nav_strategy"):
+                st.info("Use the sidebar to navigate to Strategy Builder page")
+        
+        with col_nav3:
+            if st.button("📈 Analytics", use_container_width=True, key="nav_analytics"):
+                st.info("Use the sidebar to navigate to Analytics page")
         
         # Symbol info card
         st.markdown("### Symbol Information")

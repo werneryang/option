@@ -86,6 +86,11 @@ class DatabaseManager:
                 query = query.filter(Symbol.is_active == True)
             return query.all()
     
+    def get_symbol(self, symbol: str) -> Optional[Symbol]:
+        """Get a specific symbol from the database"""
+        with self.get_session() as session:
+            return session.query(Symbol).filter(Symbol.symbol == symbol).first()
+    
     def log_download(self, symbol: str, data_type: str, status: str = "pending", 
                     records_count: int = None, file_path: str = None, 
                     error_message: str = None) -> DataDownload:

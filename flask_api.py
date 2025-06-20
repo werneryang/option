@@ -63,6 +63,7 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
+    {% raw %}
     <div id="app">
         <div class="container">
             <!-- Header -->
@@ -92,19 +93,19 @@ HTML_TEMPLATE = """
                     <h2>📋 Data Overview</h2>
                     <div class="grid">
                         <div class="metric">
-                            <div class="metric-value">{{ summary.total_symbols || 0 }}</div>
+                            <div class="metric-value">{{ summary.total_symbols ? summary.total_symbols : 0 }}</div>
                             <div class="metric-label">Symbols</div>
                         </div>
                         <div class="metric">
-                            <div class="metric-value">{{ Object.keys(summary.historical_coverage || {}).length }}</div>
+                            <div class="metric-value">{{ Object.keys(summary.historical_coverage ? summary.historical_coverage : {}).length }}</div>
                             <div class="metric-label">With Historical Data</div>
                         </div>
                         <div class="metric">
-                            <div class="metric-value">{{ summary.total_files || 0 }}</div>
+                            <div class="metric-value">{{ summary.total_files ? summary.total_files : 0 }}</div>
                             <div class="metric-label">Data Files</div>
                         </div>
                         <div class="metric">
-                            <div class="metric-value">{{ (summary.total_size_mb || 0).toFixed(2) }} MB</div>
+                            <div class="metric-value">{{ (summary.total_size_mb ? summary.total_size_mb : 0).toFixed(2) }} MB</div>
                             <div class="metric-label">Total Size</div>
                         </div>
                     </div>
@@ -207,7 +208,7 @@ HTML_TEMPLATE = """
                                     <td>${{ option.low.toFixed(2) }}</td>
                                     <td>${{ option.close.toFixed(2) }}</td>
                                     <td>{{ option.volume }}</td>
-                                    <td v-if="historicalMode">{{ option.datetime || option.date }}</td>
+                                    <td v-if="historicalMode">{{ option.datetime ? option.datetime : option.date }}</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -233,6 +234,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
     </div>
+    {% endraw %}
 
     <script>
         const { createApp } = Vue;
@@ -312,7 +314,7 @@ HTML_TEMPLATE = """
                         }
                         
                         const response = await axios.get(url);
-                        this.optionChain = response.data.options || [];
+                        this.optionChain = response.data.options ? response.data.options : [];
                     } catch (error) {
                         console.error('Error loading option chain:', error);
                         this.optionChain = [];
@@ -463,16 +465,19 @@ def api_historical(symbol):
 @app.route('/health')
 def health():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'service': 'options-analysis-api'})
+    return jsonify({
+        "status": "ok",
+        "message": "Flask API is running",
+        "timestamp": datetime.now().isoformat()
+    })
 
 if __name__ == '__main__':
     print("🚀 Starting Options Analysis Platform - Flask + Vue.js")
     print("📊 Backend: Flask REST API")
     print("🎨 Frontend: Vue.js SPA")
     print("📡 Data: Historical Options Analysis")
-    print()
-    print("🌐 Access the application at: http://localhost:5001")
-    print("📋 API documentation at: http://localhost:5001/health")
-    print()
+    print("\n🌐 Access the application at: http://localhost:8080")
+    print("📋 API health check at: http://localhost:8080/health\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    # Disable reloader for stability, especially on macOS
+    app.run(debug=True, host='0.0.0.0', port=8080, use_reloader=False)

@@ -17,7 +17,7 @@ def main():
     project_root = Path(__file__).parent
     
     # Path to the Streamlit app
-    app_path = project_root / "src" / "ui" / "app.py"
+    app_path = project_root / "src" / "ui" / "main_application.py"
     
     if not app_path.exists():
         print("❌ Error: Streamlit app not found at", app_path)

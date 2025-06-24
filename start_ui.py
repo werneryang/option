@@ -28,7 +28,7 @@ def main():
         sys.exit(1)
     
     # Get app path
-    app_path = Path(__file__).parent / "src" / "ui" / "app.py"
+    app_path = Path(__file__).parent / "src" / "ui" / "main_application.py"
     
     if not app_path.exists():
         print(f"❌ App not found: {app_path}")

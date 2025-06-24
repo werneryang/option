@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from src.ui.components.sidebar import render_sidebar
-from src.ui.pages import dashboard, option_chain, strategy_builder, analytics
+from src.ui.pages import dashboard, option_chain, strategy_builder, analytics, data_management
 from src.ui.services.data_service import DataService
 from src.utils.config import config
 
@@ -86,6 +86,8 @@ def main():
         strategy_builder.render()
     elif page == "Analytics":
         analytics.render()
+    elif page == "Data Management":
+        data_management.render()
     
     # Footer
     st.markdown("---")

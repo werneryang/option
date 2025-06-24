@@ -18,7 +18,8 @@ def render_sidebar() -> str:
             "Dashboard": "📊",
             "Option Chain": "🔗",
             "Strategy Builder": "🏗️",
-            "Analytics": "📈"
+            "Analytics": "📈",
+            "Data Management": "💾"
         }
         
         selected_page = st.radio(

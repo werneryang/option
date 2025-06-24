@@ -183,6 +183,151 @@ class IBClient:
             db_manager.update_download_status(download_id, "failed", error_message=error_msg)
             return None
     
+    async def get_historical_option_data(self, symbol: str, duration: str = "1 M", 
+                                       bar_size: str = "1 hour") -> Optional[pd.DataFrame]:
+        """Download historical option data with intraday snapshots including 16:00 close"""
+        if not self.connected:
+            logger.error("Not connected to IB TWS")
+            return None
+        
+        download_id = db_manager.log_download(symbol, "historical_options", "pending")
+        
+        try:
+            stock_contract = self._create_stock_contract(symbol)
+            qualified_contract = await self.ib.qualifyContractsAsync(stock_contract)
+            
+            if not qualified_contract:
+                error_msg = f"Could not qualify stock contract for {symbol}"
+                logger.error(error_msg)
+                db_manager.update_download_status(download_id, "failed", error_message=error_msg)
+                return None
+            
+            stock_contract = qualified_contract[0]
+            
+            # Get option chains
+            chains = await self.ib.reqSecDefOptParamsAsync(
+                stock_contract.symbol, '', stock_contract.secType, stock_contract.conId
+            )
+            
+            if not chains:
+                error_msg = f"No option chains found for {symbol}"
+                logger.error(error_msg)
+                db_manager.update_download_status(download_id, "failed", error_message=error_msg)
+                return None
+            
+            chain = chains[0]
+            
+            # Filter expirations to within 1 year
+            current_date = datetime.now().date()
+            one_year_later = current_date + timedelta(days=365)
+            
+            all_expirations = sorted(chain.expirations)
+            expirations = []
+            for exp_str in all_expirations:
+                exp_date = datetime.strptime(exp_str, '%Y%m%d').date()
+                if current_date <= exp_date <= one_year_later:
+                    expirations.append(exp_str)
+            
+            strikes = sorted(chain.strikes)
+            
+            # Expand to strikes within 20% of current price
+            current_price = await self.get_stock_price(symbol)
+            if current_price:
+                price = current_price['price']
+                # Get strikes within 20% of current price
+                expanded_strikes = [s for s in strikes if abs(s - price) / price <= 0.20]
+                strikes = sorted(expanded_strikes)
+            else:
+                # If can't get current price, use a reasonable range around middle strikes
+                mid_idx = len(strikes) // 2
+                start_idx = max(0, mid_idx - 20)
+                end_idx = min(len(strikes), mid_idx + 21)
+                strikes = strikes[start_idx:end_idx]
+            
+            logger.info(f"Found {len(expirations)} expirations within 1 year and {len(strikes)} strikes within ±20% for {symbol}")
+            
+            all_option_data = []
+            
+            for expiration in expirations:
+                for strike in strikes:
+                    for right in ['C', 'P']:
+                        option = Option(symbol, expiration, strike, right, 'SMART')
+                        try:
+                            qualified_options = await self.ib.qualifyContractsAsync(option)
+                            if qualified_options:
+                                option_contract = qualified_options[0]
+                                
+                                # Request historical data with hourly bars
+                                bars = await self.ib.reqHistoricalDataAsync(
+                                    option_contract,
+                                    endDateTime='',
+                                    durationStr=duration,
+                                    barSizeSetting=bar_size,
+                                    whatToShow='TRADES',
+                                    useRTH=True,  # Regular trading hours
+                                    formatDate=1
+                                )
+                                
+                                if bars:
+                                    for bar in bars:
+                                        # Extract hour from datetime
+                                        bar_time = bar.date
+                                        hour = bar_time.hour if hasattr(bar_time, 'hour') else 0
+                                        
+                                        # Include market hours: 9:30-16:00 (09:30, 10:00, 11:00, 12:00, 13:00, 14:00, 15:00, 16:00)
+                                        if 9 <= hour <= 16:
+                                            option_info = {
+                                                'symbol': symbol,
+                                                'date': bar_time.date() if hasattr(bar_time, 'date') else bar_time,
+                                                'time': bar_time.strftime('%H:%M:%S') if hasattr(bar_time, 'strftime') else f"{hour:02d}:00:00",
+                                                'expiration': expiration,
+                                                'strike': strike,
+                                                'option_type': right,
+                                                'open': float(bar.open),
+                                                'high': float(bar.high),
+                                                'low': float(bar.low),
+                                                'close': float(bar.close),
+                                                'volume': int(bar.volume),
+                                                'timestamp': bar_time
+                                            }
+                                            all_option_data.append(option_info)
+                                
+                                await asyncio.sleep(0.1)  # Rate limiting
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to get historical data for {symbol} {expiration} {strike} {right}: {e}")
+                            continue
+            
+            if all_option_data:
+                df = pd.DataFrame(all_option_data)
+                df['expiration'] = pd.to_datetime(df['expiration'], format='%Y%m%d').dt.date
+                df = df.sort_values(['date', 'time', 'strike', 'option_type'])
+                
+                # Save data with date-based organization
+                for date_val in df['date'].unique():
+                    daily_data = df[df['date'] == date_val]
+                    file_path = storage.save_option_chain(symbol, date_val, daily_data)
+                
+                db_manager.update_download_status(
+                    download_id, "completed", 
+                    records_count=len(df), 
+                    file_path="multiple_dates"
+                )
+                
+                logger.info(f"Successfully downloaded historical option data for {symbol}: {len(df)} records")
+                return df
+            else:
+                error_msg = f"No historical option data retrieved for {symbol}"
+                logger.error(error_msg)
+                db_manager.update_download_status(download_id, "failed", error_message=error_msg)
+                return None
+                
+        except Exception as e:
+            error_msg = f"Error downloading historical option data for {symbol}: {e}"
+            logger.error(error_msg)
+            db_manager.update_download_status(download_id, "failed", error_message=error_msg)
+            return None
+
     async def get_historical_data(self, symbol: str, duration: str = "1 Y", 
                                 bar_size: str = "1 day") -> Optional[pd.DataFrame]:
         if not self.connected:

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Options Analysis Platform - Streamlit Web Application
+Options Analysis Platform - Local Desktop Application
 
-Main entry point for the Streamlit-based user interface providing
-interactive access to options analytics, strategy building, and
-backtesting capabilities.
+Local historical data analysis platform for options research and education.
+Provides comprehensive analytics, strategy building, and backtesting capabilities
+for learning and developing options trading strategies.
+
+Focus: Historical data analysis, NOT real-time trading.
 """
 
 import streamlit as st
@@ -21,7 +23,7 @@ from src.utils.config import config
 
 # Page configuration
 st.set_page_config(
-    page_title="Options Analysis Platform",
+    page_title="Options Analysis Platform - Local Desktop",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -71,6 +73,9 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>📈 Options Analysis Platform</h1>
+        <p style="color: white; text-align: center; margin: 0; font-size: 0.9em;">
+            Local Historical Data Analysis • Educational Platform • No Real-time Trading
+        </p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -93,7 +98,7 @@ def main():
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #666;'>"
-        "Options Analysis Platform | Historical Data Analysis"
+        "Local Options Analysis Platform | Historical Data Analysis | Educational Use Only"
         "</div>", 
         unsafe_allow_html=True
     )

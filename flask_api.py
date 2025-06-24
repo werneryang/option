@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Flask API Backend for Options Analysis Platform
-Provides RESTful APIs for historical options data analysis
+Flask API Backend for Options Analysis Platform - Local Desktop Application
+
+Provides RESTful APIs for historical options data analysis and education.
+Local-only platform focused on research and learning, NOT real-time trading.
 """
 
 from flask import Flask, jsonify, request, render_template_string
@@ -32,7 +34,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Options Analysis Platform</title>
+    <title>Options Analysis Platform - Local Desktop</title>
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -69,7 +71,7 @@ HTML_TEMPLATE = """
             <!-- Header -->
             <div class="header">
                 <h1>📈 Options Analysis Platform</h1>
-                <p>Historical Options Data Analysis - Flask + Vue.js</p>
+                <p>Local Desktop • Historical Data Analysis • Educational Platform • No Real-time Trading</p>
             </div>
 
             <!-- Navigation -->

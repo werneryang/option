@@ -106,11 +106,18 @@ def render_sidebar() -> str:
             - **Option Chain**: View and analyze option chains
             - **Strategy Builder**: Create and analyze strategies
             - **Analytics**: Advanced analysis tools
+            - **Data Management**: Check data status and manage downloads
+            
+            **About This Platform:**
+            - **Local Desktop Application**: Runs on your computer only
+            - **Historical Data Analysis**: Focus on research and backtesting
+            - **Educational Tool**: Learn options trading concepts safely
             
             **Tips:**
             - Select different symbols from the dropdown
             - Adjust risk-free rate for calculations
             - Use refresh button if data seems stale
+            - Check Data Management for download status
             """)
     
     return selected_page

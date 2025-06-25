@@ -98,6 +98,7 @@ Strategy Builder & P&L Engine functionality was implemented as part of Phase 2 a
 - [x] **Strategy Builder**: Visual strategy construction with real-time P&L analysis
 - [x] **Analytics Page**: Advanced volatility analysis and performance metrics
 - [x] **Session State Management**: Fixed widget conflicts and state handling
+- [x] **UI Fixes (2025-06-23)**: Removed unwanted Deploy button, fixed event loop conflicts
 
 #### Command-Line Interfaces
 - [x] **Ultra Simple UI**: Minimal Streamlit interface focused on option chain display

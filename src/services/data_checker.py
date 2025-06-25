@@ -7,7 +7,8 @@ from loguru import logger
 
 from ..data_sources.database import db_manager, DataDownload
 from ..data_sources.storage import storage
-from ..data_sources.ib_client import downloader
+# Lazy import to avoid event loop issues
+# from ..data_sources.ib_client import downloader
 from ..utils.trading_calendar import trading_calendar
 
 
@@ -17,7 +18,7 @@ class DataChecker:
     def __init__(self):
         self.storage = storage
         self.db_manager = db_manager
-        self.downloader = downloader
+        # self.downloader = downloader  # Lazy load when needed
         self.trading_calendar = trading_calendar
     
     def get_last_download_date(self, symbol: str, data_type: str = "historical_options") -> Optional[date]:

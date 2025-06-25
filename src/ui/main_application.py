@@ -32,6 +32,21 @@ st.set_page_config(
 # Custom CSS for styling
 st.markdown("""
 <style>
+    /* Hide the Deploy button */
+    .stDeployButton {
+        display: none;
+    }
+    
+    /* Hide the three-dot menu in the top right */
+    .stAppViewBlockContainer > div:first-child > div:first-child > div:first-child > button {
+        display: none;
+    }
+    
+    /* Alternative selector for the deploy button */
+    [data-testid="stToolbar"] {
+        display: none;
+    }
+    
     .main-header {
         background: linear-gradient(90deg, #1f77b4 0%, #ff7f0e 100%);
         padding: 1rem;

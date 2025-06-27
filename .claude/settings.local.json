@@ -8,7 +8,8 @@
       "Bash(ls:*)",
       "Bash(find:*)",
       "Bash(git branch:*)",
-      "Bash(STREAMLIT_BROWSER_GATHER_USAGE_STATS=false python -m streamlit run src/ui/app.py --server.port 8503)"
+      "Bash(STREAMLIT_BROWSER_GATHER_USAGE_STATS=false python -m streamlit run src/ui/app.py --server.port 8503)",
+      "Bash(rg:*)"
     ],
     "deny": []
   }

@@ -523,17 +523,7 @@ def display_data_summary(summary: Dict[str, Any]):
             for download in summary['recent_downloads']
         ])
         
-        # Style the dataframe
-        def style_status(val):
-            if val == 'completed':
-                return 'background-color: #d4edda; color: #155724'
-            elif val == 'failed':
-                return 'background-color: #f8d7da; color: #721c24'
-            else:
-                return 'background-color: #fff3cd; color: #856404'
-        
-        styled_df = downloads_df.style.applymap(style_status, subset=['Status'])
-        st.dataframe(styled_df, use_container_width=True)
+        st.dataframe(downloads_df, use_container_width=True)
     else:
         st.info("No recent downloads found.")
 
@@ -579,18 +569,7 @@ def render_download_status():
             
             if status_data:
                 df = pd.DataFrame(status_data)
-                
-                # Color coding
-                def highlight_status(row):
-                    if 'Up to Date' in row['Status']:
-                        return ['background-color: #d4edda'] * len(row)
-                    elif 'Needs Update' in row['Status']:
-                        return ['background-color: #fff3cd'] * len(row)
-                    else:
-                        return ['background-color: #f8d7da'] * len(row)
-                
-                styled_df = df.style.apply(highlight_status, axis=1)
-                st.dataframe(styled_df, use_container_width=True)
+                st.dataframe(df, use_container_width=True)
                 
                 # Summary metrics
                 col1, col2, col3 = st.columns(3)
@@ -681,18 +660,7 @@ def perform_bulk_check(symbols: List[str]):
         # Display results
         if results:
             df = pd.DataFrame(results)
-            
-            # Style the dataframe
-            def highlight_status(row):
-                if 'Up to Date' in row['Status']:
-                    return ['background-color: #d4edda'] * len(row)
-                elif 'Needs Update' in row['Status']:
-                    return ['background-color: #fff3cd'] * len(row)
-                else:
-                    return ['background-color: #f8d7da'] * len(row)
-            
-            styled_df = df.style.apply(highlight_status, axis=1)
-            st.dataframe(styled_df, use_container_width=True)
+            st.dataframe(df, use_container_width=True)
             
             # Summary
             up_to_date = len([r for r in results if not r['Needs Download']])

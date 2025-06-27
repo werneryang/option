@@ -81,19 +81,7 @@ def render_version_status():
         
         if status_data:
             df = pd.DataFrame(status_data)
-            
-            # Color coding
-            def highlight_status(row):
-                if row['状态'] == 'UNTRACKED':
-                    return ['background-color: #fff3cd'] * len(row)
-                elif row['状态'] == 'MODIFIED':
-                    return ['background-color: #d1ecf1'] * len(row)
-                elif row['状态'] == 'STAGED':
-                    return ['background-color: #d4edda'] * len(row)
-                return [''] * len(row)
-            
-            styled_df = df.style.apply(highlight_status, axis=1)
-            st.dataframe(styled_df, use_container_width=True)
+            st.dataframe(df, use_container_width=True)
         else:
             st.success("✅ 工作目录干净，没有待提交的更改")
     
@@ -229,22 +217,7 @@ def render_commit_history():
                 })
             
             df = pd.DataFrame(history_data)
-            
-            # Color coding by commit type
-            def highlight_commit_type(row):
-                commit_type = row['类型']
-                if commit_type == "自动":
-                    return ['background-color: #e7f3ff'] * len(row)
-                elif commit_type == "数据":
-                    return ['background-color: #f0f9ff'] * len(row)
-                elif commit_type == "功能":
-                    return ['background-color: #f0fff0'] * len(row)
-                elif commit_type == "修复":
-                    return ['background-color: #fff5f5'] * len(row)
-                return [''] * len(row)
-            
-            styled_df = df.style.apply(highlight_commit_type, axis=1)
-            st.dataframe(styled_df, use_container_width=True)
+            st.dataframe(df, use_container_width=True)
             
             # Statistics
             st.markdown("#### 📈 统计信息")

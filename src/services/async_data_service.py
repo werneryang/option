@@ -95,21 +95,11 @@ class AsyncDataService:
             # Update progress: Starting
             self._update_progress(task_id, 10, "Connecting to data source...")
             
-            # Return mock success for UI compatibility (avoiding event loop issues)
-            import time
-            time.sleep(2)  # Simulate download time
+            # Update progress: Downloading
+            self._update_progress(task_id, 30, "Downloading historical data...")
             
-            result = {
-                'symbol': symbol,
-                'success': True,
-                'downloads': {
-                    'historical_options': {
-                        'success': True,
-                        'records': 1000
-                    }
-                },
-                'message': 'Mock download completed successfully'
-            }
+            # Use the real download function
+            result = self._run_real_download(symbol, data_types)
             
             # Update progress based on result
             if result.get('success'):
@@ -122,6 +112,67 @@ class AsyncDataService:
         except Exception as e:
             self._update_progress(task_id, 0, f"Error: {str(e)}")
             raise
+    
+    def _run_real_download(self, symbol: str, data_types: List[str]) -> Dict[str, Any]:
+        """
+        Execute real download from IB TWS using the synchronous download method
+        """
+        import time
+        
+        result = {
+            'symbol': symbol,
+            'success': False,
+            'downloads': {},
+            'message': '',
+            'errors': []
+        }
+        
+        try:
+            # Stage 1: Real connection attempt
+            logger.info(f"Starting REAL download for {symbol} - connecting to IB TWS...")
+            time.sleep(1)
+            
+            # Stage 2: Use the synchronous download method that we know works
+            logger.info(f"Executing real download for {symbol} using synchronous method...")
+            
+            # Import the downloader here to avoid circular imports
+            from ..data_sources.ib_client import DataDownloader
+            downloader = DataDownloader()
+            
+            # Call the synchronous download method
+            download_result = downloader.download_options_data(symbol)
+            
+            # The download_options_data method returns a structured result
+            if download_result.get('success'):
+                records = download_result['downloads']['historical_options']['records']
+                result['downloads']['historical_options'] = {
+                    'success': True,
+                    'records': records
+                }
+                result['success'] = True
+                result['message'] = f'Successfully downloaded {records} new records from IB TWS'
+                logger.info(f"Real download successful for {symbol}: {records} records")
+            else:
+                error_msg = download_result.get('message', 'Unknown error')
+                result['downloads']['historical_options'] = {
+                    'success': False,
+                    'records': 0
+                }
+                result['message'] = f'Download failed: {error_msg}'
+                result['errors'].append(error_msg)
+                logger.warning(f"Real download failed for {symbol}: {error_msg}")
+            
+            return result
+                
+        except Exception as e:
+            logger.error(f"Error in real download for {symbol}: {e}")
+            return {
+                'symbol': symbol,
+                'success': False,
+                'downloads': {},
+                'message': f'Download error: {str(e)}',
+                'errors': [str(e)]
+            }
     
     async def _async_download_with_progress(self, task_id: str, symbol: str, data_types: List[str] = None) -> Dict[str, Any]:
         """

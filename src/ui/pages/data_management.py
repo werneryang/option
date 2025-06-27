@@ -203,6 +203,9 @@ def start_download(symbol: str, download_types: list, force: bool = False):
             st.warning(f"⚠️ Download already in progress for {symbol}. Check Download Status tab.")
             return
     
+    # Display connection warning
+    st.warning("⚠️ **Important**: This requires IB TWS (Interactive Brokers Trader Workstation) to be running and connected. If TWS is not running, the download will fail with 'Not connected to IB TWS' error.")
+    
     # Start the background download
     task_id = async_data_service.start_background_download(symbol, download_types)
     
@@ -213,6 +216,7 @@ def start_download(symbol: str, download_types: list, force: bool = False):
     st.success(f"✅ {action_type} started for {symbol}!")
     st.info(f"📋 Task ID: {task_id}")
     st.info("💡 Check the 'Download Status' tab to monitor progress.")
+    st.info("🔌 If download fails, ensure IB TWS is running and connected.")
 
 
 def show_download_progress():

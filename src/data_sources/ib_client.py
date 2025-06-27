@@ -15,8 +15,16 @@ class IBClient:
         self.port = port or config.ib_port
         self.client_id = client_id or config.ib_client_id
         
-        self.ib = IB()
+        self._ib = None
         self.connected = False
+    
+    @property
+    def ib(self):
+        """Lazy initialization of IB connection to avoid event loop issues"""
+        if self._ib is None:
+            from ib_insync import IB
+            self._ib = IB()
+        return self._ib
     
     async def connect(self) -> bool:
         try:
@@ -39,6 +47,7 @@ class IBClient:
         return Stock(symbol, 'SMART', 'USD')
     
     async def get_stock_price(self, symbol: str) -> Optional[Dict[str, float]]:
+        """Get historical stock price (NOT real-time market data)"""
         if not self.connected:
             logger.error("Not connected to IB TWS")
             return None
@@ -52,35 +61,45 @@ class IBClient:
                 return None
             
             contract = qualified_contract[0]
-            ticker = self.ib.reqMktData(contract)
-            await asyncio.sleep(2)  # Wait for market data
             
-            if ticker.last and ticker.last > 0:
+            # Use historical data instead of real-time market data
+            bars = await self.ib.reqHistoricalDataAsync(
+                contract,
+                endDateTime='',
+                durationStr='1 D',  # Get last day's data
+                barSizeSetting='1 day',
+                whatToShow='TRADES',
+                useRTH=True,
+                formatDate=1
+            )
+            
+            if bars and len(bars) > 0:
+                latest_bar = bars[-1]  # Get most recent bar
                 price_data = {
                     'symbol': symbol,
-                    'price': float(ticker.last),
-                    'bid': float(ticker.bid) if ticker.bid else None,
-                    'ask': float(ticker.ask) if ticker.ask else None,
-                    'timestamp': datetime.now()
+                    'price': float(latest_bar.close),
+                    'bid': None,  # Historical data doesn't have bid/ask
+                    'ask': None,
+                    'timestamp': latest_bar.date
                 }
-                logger.info(f"Retrieved stock price for {symbol}: ${ticker.last}")
+                logger.info(f"Retrieved historical stock price for {symbol}: ${latest_bar.close}")
                 return price_data
             else:
-                logger.warning(f"No valid price data for {symbol}")
+                logger.warning(f"No historical price data for {symbol}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Error getting stock price for {symbol}: {e}")
+            logger.error(f"Error getting historical stock price for {symbol}: {e}")
             return None
-        finally:
-            self.ib.cancelMktData(contract)
     
     async def get_option_chain(self, symbol: str, expiration_date: date = None) -> Optional[pd.DataFrame]:
+        """Get historical option chain data (NOT real-time market data)"""
         if not self.connected:
             logger.error("Not connected to IB TWS")
             return None
         
-        download_id = db_manager.log_download(symbol, "options", "pending")
+        download_record = db_manager.log_download(symbol, "options", "pending")
+        download_id = download_record.id
         
         try:
             stock_contract = self._create_stock_contract(symbol)
@@ -118,11 +137,18 @@ class IBClient:
             else:
                 expirations = expirations[:3]  # Get next 3 expirations
             
+            # Use middle strikes to avoid market data subscription requirements
+            strikes = sorted(chain.strikes)
+            mid_idx = len(strikes) // 2
+            start_idx = max(0, mid_idx - 10)
+            end_idx = min(len(strikes), mid_idx + 11)
+            strikes = strikes[start_idx:end_idx]
+            
+            logger.info(f"Using historical data approach for {symbol} option chain (avoiding real-time market data)")
+            
             option_data = []
             
             for expiration in expirations:
-                strikes = sorted(chain.strikes)
-                
                 for strike in strikes:
                     for right in ['C', 'P']:  # Call and Put
                         option = Option(symbol, expiration, strike, right, 'SMART')
@@ -130,31 +156,50 @@ class IBClient:
                             qualified_options = await self.ib.qualifyContractsAsync(option)
                             if qualified_options:
                                 option_contract = qualified_options[0]
-                                ticker = self.ib.reqMktData(option_contract)
-                                await asyncio.sleep(0.1)  # Brief pause to get data
                                 
-                                option_info = {
-                                    'symbol': symbol,
-                                    'expiration': expiration,
-                                    'strike': strike,
-                                    'option_type': right,
-                                    'bid': float(ticker.bid) if ticker.bid else 0,
-                                    'ask': float(ticker.ask) if ticker.ask else 0,
-                                    'last': float(ticker.last) if ticker.last else 0,
-                                    'volume': int(ticker.volume) if ticker.volume else 0,
-                                    'open_interest': getattr(ticker, 'openInterest', 0),
-                                    'implied_volatility': getattr(ticker, 'impliedVolatility', 0),
-                                    'delta': getattr(ticker, 'delta', 0),
-                                    'gamma': getattr(ticker, 'gamma', 0),
-                                    'theta': getattr(ticker, 'theta', 0),
-                                    'vega': getattr(ticker, 'vega', 0),
-                                    'timestamp': datetime.now()
-                                }
-                                option_data.append(option_info)
-                                self.ib.cancelMktData(option_contract)
+                                # Use historical data instead of real-time market data
+                                try:
+                                    bars = await asyncio.wait_for(
+                                        self.ib.reqHistoricalDataAsync(
+                                            option_contract,
+                                            endDateTime='',
+                                            durationStr='1 D',  # Get last day's data
+                                            barSizeSetting='1 day',
+                                            whatToShow='TRADES',
+                                            useRTH=True,
+                                            formatDate=1
+                                        ),
+                                        timeout=10.0
+                                    )
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"Timeout getting historical data for {symbol} {expiration} {strike} {right}")
+                                    continue
+                                
+                                if bars and len(bars) > 0:
+                                    latest_bar = bars[-1]  # Get most recent bar
+                                    option_info = {
+                                        'symbol': symbol,
+                                        'expiration': expiration,
+                                        'strike': strike,
+                                        'option_type': right,
+                                        'bid': 0,  # Historical data doesn't have bid/ask
+                                        'ask': 0,
+                                        'last': float(latest_bar.close),
+                                        'volume': int(latest_bar.volume),
+                                        'open_interest': 0,  # Not available in historical bars
+                                        'implied_volatility': 0,  # Not available in historical bars
+                                        'delta': 0,  # Not available in historical bars
+                                        'gamma': 0,
+                                        'theta': 0,
+                                        'vega': 0,
+                                        'timestamp': latest_bar.date
+                                    }
+                                    option_data.append(option_info)
+                                
+                                await asyncio.sleep(0.1)  # Rate limiting
                                 
                         except Exception as e:
-                            logger.warning(f"Failed to get data for {symbol} {expiration} {strike} {right}: {e}")
+                            logger.warning(f"Failed to get historical data for {symbol} {expiration} {strike} {right}: {e}")
                             continue
             
             if option_data:
@@ -169,16 +214,16 @@ class IBClient:
                     file_path=str(file_path)
                 )
                 
-                logger.info(f"Successfully downloaded option chain for {symbol}: {len(df)} contracts")
+                logger.info(f"Successfully downloaded historical option chain for {symbol}: {len(df)} contracts")
                 return df
             else:
-                error_msg = f"No option data retrieved for {symbol}"
+                error_msg = f"No historical option data retrieved for {symbol}"
                 logger.error(error_msg)
                 db_manager.update_download_status(download_id, "failed", error_message=error_msg)
                 return None
                 
         except Exception as e:
-            error_msg = f"Error downloading option chain for {symbol}: {e}"
+            error_msg = f"Error downloading historical option chain for {symbol}: {e}"
             logger.error(error_msg)
             db_manager.update_download_status(download_id, "failed", error_message=error_msg)
             return None
@@ -190,7 +235,8 @@ class IBClient:
             logger.error("Not connected to IB TWS")
             return None
         
-        download_id = db_manager.log_download(symbol, "historical_options", "pending")
+        download_record = db_manager.log_download(symbol, "historical_options", "pending")
+        download_id = download_record.id
         
         try:
             stock_contract = self._create_stock_contract(symbol)
@@ -217,32 +263,29 @@ class IBClient:
             
             chain = chains[0]
             
-            # Filter expirations to within 1 year
+            # Filter expirations to within 2 months for faster downloads
             current_date = datetime.now().date()
-            one_year_later = current_date + timedelta(days=365)
+            two_months_later = current_date + timedelta(days=60)
             
             all_expirations = sorted(chain.expirations)
             expirations = []
             for exp_str in all_expirations:
                 exp_date = datetime.strptime(exp_str, '%Y%m%d').date()
-                if current_date <= exp_date <= one_year_later:
+                if current_date <= exp_date <= two_months_later:
                     expirations.append(exp_str)
+            
+            # Limit to first 2 expirations for faster downloads
+            expirations = expirations[:2]
             
             strikes = sorted(chain.strikes)
             
-            # Expand to strikes within 20% of current price
-            current_price = await self.get_stock_price(symbol)
-            if current_price:
-                price = current_price['price']
-                # Get strikes within 20% of current price
-                expanded_strikes = [s for s in strikes if abs(s - price) / price <= 0.20]
-                strikes = sorted(expanded_strikes)
-            else:
-                # If can't get current price, use a reasonable range around middle strikes
-                mid_idx = len(strikes) // 2
-                start_idx = max(0, mid_idx - 20)
-                end_idx = min(len(strikes), mid_idx + 21)
-                strikes = strikes[start_idx:end_idx]
+            # Skip real-time price lookup - use middle strike range for historical data
+            # This avoids market data subscription requirements
+            logger.info(f"Using middle strike range for {symbol} (avoiding real-time market data)")
+            mid_idx = len(strikes) // 2
+            start_idx = max(0, mid_idx - 5)  # Reduced from 10 to 5
+            end_idx = min(len(strikes), mid_idx + 6)  # Reduced from 11 to 6
+            strikes = strikes[start_idx:end_idx]
             
             logger.info(f"Found {len(expirations)} expirations within 1 year and {len(strikes)} strikes within ±20% for {symbol}")
             
@@ -257,16 +300,23 @@ class IBClient:
                             if qualified_options:
                                 option_contract = qualified_options[0]
                                 
-                                # Request historical data with hourly bars
-                                bars = await self.ib.reqHistoricalDataAsync(
-                                    option_contract,
-                                    endDateTime='',
-                                    durationStr=duration,
-                                    barSizeSetting=bar_size,
-                                    whatToShow='TRADES',
-                                    useRTH=True,  # Regular trading hours
-                                    formatDate=1
-                                )
+                                # Request historical data with timeout
+                                try:
+                                    bars = await asyncio.wait_for(
+                                        self.ib.reqHistoricalDataAsync(
+                                            option_contract,
+                                            endDateTime='',
+                                            durationStr=duration,
+                                            barSizeSetting=bar_size,
+                                            whatToShow='TRADES',
+                                            useRTH=True,  # Regular trading hours
+                                            formatDate=1
+                                        ),
+                                        timeout=10.0  # 10 second timeout per contract
+                                    )
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"Timeout getting data for {symbol} {expiration} {strike} {right}")
+                                    continue
                                 
                                 if bars:
                                     for bar in bars:
@@ -334,7 +384,8 @@ class IBClient:
             logger.error("Not connected to IB TWS")
             return None
         
-        download_id = db_manager.log_download(symbol, "stock_price", "pending")
+        download_record = db_manager.log_download(symbol, "stock_price", "pending")
+        download_id = download_record.id
         
         try:
             contract = self._create_stock_contract(symbol)
@@ -404,28 +455,134 @@ class DataDownloader:
     
     def download_options_data(self, symbol: str) -> Dict[str, Any]:
         """
-        Synchronous wrapper for downloading options data
+        Synchronous wrapper for downloading options data - runs in subprocess to avoid event loop conflicts
         """
+        import subprocess
+        import sys
+        import os
+        
         try:
-            # For Streamlit compatibility, we'll return a mock success result
-            # The actual async download will be handled separately
-            return {
-                'symbol': symbol,
-                'success': True,
-                'downloads': {
-                    'historical_options': {
-                        'success': True,
-                        'records': 1000  # Mock data
+            # Create a simple subprocess script for historical data download
+            download_script = f'''
+import sys
+import os
+import asyncio
+sys.path.append("{os.getcwd()}")
+
+async def download_historical_data():
+    from src.data_sources.ib_client import IBClient
+    
+    client = IBClient(client_id=99)  # Use unique client ID
+    try:
+        connected = await client.connect()
+        if not connected:
+            print("ERROR: Failed to connect to IB TWS")
+            return
+        
+        # Download historical option data
+        data = await client.get_historical_option_data("{symbol}")
+        if data is not None and len(data) > 0:
+            print(f"SUCCESS: {{len(data)}}")
+        else:
+            print("ERROR: No data returned")
+    except Exception as e:
+        print(f"ERROR: {{str(e)}}")
+    finally:
+        await client.disconnect()
+
+# Run the download in a clean event loop
+asyncio.run(download_historical_data())
+'''
+            
+            # Execute in subprocess to avoid event loop conflicts
+            process = subprocess.run(
+                [sys.executable, '-c', download_script],
+                capture_output=True,
+                text=True,
+                timeout=180  # 3 minute timeout
+            )
+            
+            if process.returncode == 0:
+                output = process.stdout.strip()
+                if "SUCCESS:" in output:
+                    # Extract record count
+                    try:
+                        records = int(output.split("SUCCESS:")[1].strip())
+                        return {
+                            'symbol': symbol,
+                            'success': True,
+                            'downloads': {
+                                'historical_options': {
+                                    'success': True,
+                                    'records': records
+                                }
+                            },
+                            'message': f'Successfully downloaded {records} historical options records'
+                        }
+                    except (ValueError, IndexError):
+                        records = 0
+                        return {
+                            'symbol': symbol,
+                            'success': True,
+                            'downloads': {
+                                'historical_options': {
+                                    'success': True,
+                                    'records': records
+                                }
+                            },
+                            'message': 'Download completed successfully'
+                        }
+                else:
+                    error_msg = output.replace("ERROR:", "").strip()
+                    return {
+                        'symbol': symbol,
+                        'success': False,
+                        'downloads': {
+                            'historical_options': {
+                                'success': False,
+                                'records': 0
+                            }
+                        },
+                        'message': error_msg
                     }
-                },
-                'message': 'Download initiated (mock for UI compatibility)'
-            }
-        except Exception as e:
+            else:
+                error_output = process.stderr.strip() or "Process failed"
+                return {
+                    'symbol': symbol,
+                    'success': False,
+                    'downloads': {
+                        'historical_options': {
+                            'success': False,
+                            'records': 0
+                        }
+                    },
+                    'message': f'Download process failed: {error_output}'
+                }
+                
+        except subprocess.TimeoutExpired:
             return {
                 'symbol': symbol,
                 'success': False,
-                'errors': [str(e)],
-                'message': f'Error: {e}'
+                'downloads': {
+                    'historical_options': {
+                        'success': False,
+                        'records': 0
+                    }
+                },
+                'message': 'Download timed out after 3 minutes'
+            }
+        except Exception as e:
+            logger.error(f"Error in synchronous download for {symbol}: {e}")
+            return {
+                'symbol': symbol,
+                'success': False,
+                'downloads': {
+                    'historical_options': {
+                        'success': False,
+                        'records': 0
+                    }
+                },
+                'message': f'Download error: {e}'
             }
     
     async def download_symbol_data(self, symbol: str, include_options: bool = True, 
@@ -474,4 +631,5 @@ class DataDownloader:
         
         return results
 
+# Create global downloader instance
 downloader = DataDownloader()

@@ -7,8 +7,6 @@ from loguru import logger
 
 from ..data_sources.database import db_manager, DataDownload
 from ..data_sources.storage import storage
-# Lazy import to avoid event loop issues
-# from ..data_sources.ib_client import downloader
 from ..utils.trading_calendar import trading_calendar
 
 
@@ -18,8 +16,16 @@ class DataChecker:
     def __init__(self):
         self.storage = storage
         self.db_manager = db_manager
-        # self.downloader = downloader  # Lazy load when needed
         self.trading_calendar = trading_calendar
+        self._downloader = None
+    
+    @property
+    def downloader(self):
+        """Lazy load downloader to avoid event loop issues at startup"""
+        if self._downloader is None:
+            from ..data_sources.ib_client import downloader
+            self._downloader = downloader
+        return self._downloader
     
     def get_last_download_date(self, symbol: str, data_type: str = "historical_options") -> Optional[date]:
         """
@@ -33,6 +39,7 @@ class DataChecker:
             Last download date or None if no downloads found
         """
         try:
+            # First try to get from database records
             with self.db_manager.get_session() as session:
                 last_download = session.query(DataDownload).filter(
                     DataDownload.symbol == symbol,
@@ -42,7 +49,22 @@ class DataChecker:
                 
                 if last_download:
                     return last_download.download_date.date()
-                return None
+            
+            # If no completed database records, check actual data files
+            if data_type == "historical_options":
+                try:
+                    available_dates = self.storage.get_available_dates(symbol)
+                    if available_dates:
+                        latest_date = max(available_dates)
+                        # Verify data exists for this date
+                        data = self.storage.load_option_chain(symbol, latest_date)
+                        if data is not None and len(data) > 0:
+                            logger.info(f"Found existing data for {symbol}: {len(data)} records on {latest_date}")
+                            return latest_date
+                except Exception as e:
+                    logger.debug(f"Error checking actual data files for {symbol}: {e}")
+            
+            return None
                 
         except Exception as e:
             logger.error(f"Error getting last download date for {symbol}: {e}")
@@ -93,9 +115,14 @@ class DataChecker:
                 result['reason'] = f"Data outdated. Last: {last_options_date}, Expected: {expected_date}"
                 result['download_types_needed'] = ["historical_options"]
             else:
-                # Data is up to date
+                # Data is up to date - adjust expected date for UI clarity
                 result['is_up_to_date'] = True
                 result['reason'] = "Data is up to date"
+                
+                # If we have data newer than expected, show the actual data date as expected
+                # This makes the UI more intuitive when showing "Last Download" vs "Expected Date"
+                if last_options_date > expected_date:
+                    result['expected_date'] = last_options_date
             
             logger.info(f"Data freshness check for {symbol}: {result['reason']}")
             return result

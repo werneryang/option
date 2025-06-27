@@ -122,9 +122,13 @@ def render():
     # Load option chain (historical or current)
     if historical_mode and target_date:
         option_chain = data_service.get_option_chain(selected_symbol, target_date)
+        data_date = target_date
         st.info(f"📅 Showing option chain for {target_date}")
     else:
         option_chain = data_service.get_option_chain(selected_symbol)
+        # Get the actual date used for the latest data
+        available_dates = data_service.get_available_option_dates(selected_symbol)
+        data_date = max(available_dates) if available_dates else None
         st.info("📅 Showing latest available option chain")
     
     if option_chain is None or len(option_chain) == 0:
@@ -163,48 +167,35 @@ def render():
     # Display options
     st.subheader("📊 Option Chain Data")
     
-    # Format display columns
-    display_columns = ['strike', 'option_type', 'bid', 'ask', 'last', 'volume']
-    greek_columns = ['delta', 'gamma', 'theta', 'vega', 'rho']
+    # Display file path information
+    if data_date:
+        file_path = f"data/processed/{selected_symbol}/{data_date}/options.parquet"
+        st.info(f"📁 File path: {file_path}")
+    else:
+        st.info(f"📁 File path: Unable to determine data file path")
     
-    # Add Greeks columns if available
-    available_greeks = [col for col in greek_columns if col in display_data.columns]
-    display_columns.extend(available_greeks)
+    # Display all available columns without color rendering
+    st.info(f"Available columns: {', '.join(display_data.columns.tolist())}")
+    
+    # Show all data columns (excluding collected_at)
+    system_columns = ['collected_at']
+    display_columns = [col for col in display_data.columns if col not in system_columns]
     
     # Format the dataframe for display
     formatted_data = display_data[display_columns].copy()
     
     # Round numeric columns
-    numeric_columns = ['bid', 'ask', 'last'] + available_greeks
+    numeric_columns = ['open', 'high', 'low', 'close', 'strike', 'volume']
     for col in numeric_columns:
         if col in formatted_data.columns:
             formatted_data[col] = formatted_data[col].round(4)
     
-    # Color coding based on moneyness
-    def highlight_moneyness(row):
-        strike = row['strike']
-        if abs(strike - current_price) / current_price < 0.02:  # Within 2%
-            return ['background-color: #ffffcc'] * len(row)  # Light yellow for ATM
-        elif (row['option_type'] == 'C' and strike < current_price) or \
-             (row['option_type'] == 'P' and strike > current_price):
-            return ['background-color: #ccffcc'] * len(row)  # Light green for ITM
-        else:
-            return ['background-color: #ffcccc'] * len(row)  # Light red for OTM
-    
-    # Display the styled dataframe
+    # Display the dataframe without color rendering
     st.dataframe(
-        formatted_data.style.apply(highlight_moneyness, axis=1),
+        formatted_data,
         use_container_width=True,
         height=400
     )
-    
-    # Legend
-    st.markdown("""
-    **Color Legend:** 
-    🟡 **Yellow** = At-the-money (within 2%) | 
-    🟢 **Green** = In-the-money | 
-    🔴 **Red** = Out-of-the-money
-    """)
     
     # Visualization section
     if not greeks_df.empty:

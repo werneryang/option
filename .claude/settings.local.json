@@ -9,7 +9,9 @@
       "Bash(find:*)",
       "Bash(git branch:*)",
       "Bash(STREAMLIT_BROWSER_GATHER_USAGE_STATS=false python -m streamlit run src/ui/app.py --server.port 8503)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }

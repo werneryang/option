@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 
+
+## [1.2.0.3] - 2025-06-27 18:35:45
+
+### Config
+- version.json
+
+### Docs
+- CHANGELOG.md
+
+
 ## [1.1.1.2] - 2025-06-27 18:34:28
 
 ### Code

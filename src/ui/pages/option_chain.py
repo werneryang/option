@@ -59,6 +59,9 @@ def render():
     start_time = None
     end_time = None
     
+    # Determine if we're in historical mode
+    historical_mode = data_source in ["Legacy Processed", "Historical Archive"]
+    
     if data_source == "Legacy Processed" and available_dates:
         st.markdown("#### Select Analysis Date")
         target_date = st.selectbox(
@@ -142,15 +145,14 @@ def render():
         )
     
     with col3:
-        # Days to expiry filter (for historical analysis)
-        if historical_mode:
-            days_filter = st.slider(
-                "Days to Expiry (filter)",
-                min_value=0,
-                max_value=365,
-                value=(0, 90),
-                help="Filter options by days to expiration"
-            )
+        # Days to expiry filter (available for all data sources)
+        days_filter = st.slider(
+            "Days to Expiry (filter)",
+            min_value=0,
+            max_value=365,
+            value=(0, 90),
+            help="Filter options by days to expiration"
+        )
     
     # Load data based on selected source
     if data_source == "Legacy Processed":

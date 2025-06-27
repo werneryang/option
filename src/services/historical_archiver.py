@@ -304,7 +304,7 @@ class HistoricalArchiver:
     def get_all_archive_status(self) -> Dict[str, Dict[str, Any]]:
         """Get archive status for all active symbols"""
         try:
-            active_symbols = db_manager.get_active_symbols()
+            active_symbols = db_manager.get_symbols(active_only=True)
             status_dict = {}
             
             for symbol_obj in active_symbols:

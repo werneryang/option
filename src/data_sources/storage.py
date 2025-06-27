@@ -4,9 +4,64 @@ import pyarrow.parquet as pq
 from pathlib import Path
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
+import fcntl
+import time
+import os
 from loguru import logger
 
 from ..utils.config import config
+
+class FileLock:
+    """Cross-platform file locking context manager"""
+    
+    def __init__(self, file_path: Path, timeout: int = 30):
+        self.file_path = file_path
+        self.timeout = timeout
+        self.lock_file_path = file_path.with_suffix(f"{file_path.suffix}.lock")
+        self.lock_file = None
+    
+    def __enter__(self):
+        start_time = time.time()
+        
+        while time.time() - start_time < self.timeout:
+            try:
+                # Create lock file
+                self.lock_file = open(self.lock_file_path, 'w')
+                
+                # Try to acquire exclusive lock
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                
+                logger.debug(f"Acquired file lock: {self.lock_file_path}")
+                return self
+                
+            except (IOError, OSError):
+                # Lock not available, close file and retry
+                if self.lock_file:
+                    self.lock_file.close()
+                    self.lock_file = None
+                
+                time.sleep(0.1)  # Wait 100ms before retrying
+        
+        raise TimeoutError(f"Could not acquire file lock for {self.file_path} within {self.timeout} seconds")
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.lock_file:
+            try:
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+                self.lock_file.close()
+                
+                # Clean up lock file
+                if self.lock_file_path.exists():
+                    self.lock_file_path.unlink()
+                
+                logger.debug(f"Released file lock: {self.lock_file_path}")
+                
+            except Exception as e:
+                logger.warning(f"Error releasing file lock {self.lock_file_path}: {e}")
+            
+            finally:
+                self.lock_file = None
+
 
 class ParquetStorage:
     def __init__(self, base_path: Optional[Path] = None):
@@ -77,25 +132,27 @@ class ParquetStorage:
         file_path = self._get_prices_path(symbol)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
-        try:
-            existing_df = self.load_price_history(symbol)
-            if existing_df is not None:
-                combined_df = pd.concat([existing_df, df]).drop_duplicates(
-                    subset=['date'], keep='last'
-                ).sort_values('date')
-            else:
-                combined_df = df.sort_values('date')
-            
-            combined_df.to_parquet(
-                file_path,
-                compression=self.compression,
-                index=False
-            )
-            logger.info(f"Saved price history for {symbol}: {len(combined_df)} records")
-            return file_path
-        except Exception as e:
-            logger.error(f"Failed to save price history for {symbol}: {e}")
-            raise
+        # Use file locking to prevent concurrent write conflicts
+        with FileLock(file_path, timeout=30):
+            try:
+                existing_df = self.load_price_history(symbol)
+                if existing_df is not None:
+                    combined_df = pd.concat([existing_df, df]).drop_duplicates(
+                        subset=['date'], keep='last'
+                    ).sort_values('date')
+                else:
+                    combined_df = df.sort_values('date')
+                
+                combined_df.to_parquet(
+                    file_path,
+                    compression=self.compression,
+                    index=False
+                )
+                logger.info(f"Saved price history for {symbol}: {len(combined_df)} records")
+                return file_path
+            except Exception as e:
+                logger.error(f"Failed to save price history for {symbol}: {e}")
+                raise
     
     def load_price_history(self, symbol: str, start_date: Optional[date] = None, 
                           end_date: Optional[date] = None) -> Optional[pd.DataFrame]:
@@ -276,40 +333,42 @@ class ParquetStorage:
     # === NEW METHODS FOR DUAL WORKFLOW ===
     
     def save_snapshot(self, symbol: str, timestamp: datetime, df: pd.DataFrame) -> Path:
-        """Save real-time option snapshot - appends to daily cumulative file"""
+        """Save real-time option snapshot - appends to daily cumulative file with file locking"""
         date_str = timestamp.strftime("%Y-%m-%d")
         file_path = self._get_snapshots_path(symbol, date_str)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
-        try:
-            # Add snapshot timestamp if not present
-            if 'snapshot_time' not in df.columns:
-                df['snapshot_time'] = timestamp
-            if 'collected_at' not in df.columns:
-                df['collected_at'] = datetime.now()
-            
-            # Append to existing file or create new one
-            if file_path.exists():
-                existing_df = pd.read_parquet(file_path)
-                combined_df = pd.concat([existing_df, df], ignore_index=True)
-                # Remove duplicates based on symbol, snapshot_time, strike, option_type
-                combined_df = combined_df.drop_duplicates(
-                    subset=['symbol', 'snapshot_time', 'strike', 'option_type'], 
-                    keep='last'
-                ).sort_values(['snapshot_time', 'strike', 'option_type'])
-            else:
-                combined_df = df.sort_values(['snapshot_time', 'strike', 'option_type'])
-            
-            combined_df.to_parquet(
-                file_path,
-                compression=self.compression,
-                index=False
-            )
-            logger.info(f"Saved snapshot for {symbol} at {timestamp}: {len(df)} new records, {len(combined_df)} total")
-            return file_path
-        except Exception as e:
-            logger.error(f"Failed to save snapshot for {symbol} at {timestamp}: {e}")
-            raise
+        # Use file locking to prevent concurrent write conflicts
+        with FileLock(file_path, timeout=30):
+            try:
+                # Add snapshot timestamp if not present
+                if 'snapshot_time' not in df.columns:
+                    df['snapshot_time'] = timestamp
+                if 'collected_at' not in df.columns:
+                    df['collected_at'] = datetime.now()
+                
+                # Append to existing file or create new one
+                if file_path.exists():
+                    existing_df = pd.read_parquet(file_path)
+                    combined_df = pd.concat([existing_df, df], ignore_index=True)
+                    # Remove duplicates based on symbol, snapshot_time, strike, option_type
+                    combined_df = combined_df.drop_duplicates(
+                        subset=['symbol', 'snapshot_time', 'strike', 'option_type'], 
+                        keep='last'
+                    ).sort_values(['snapshot_time', 'strike', 'option_type'])
+                else:
+                    combined_df = df.sort_values(['snapshot_time', 'strike', 'option_type'])
+                
+                combined_df.to_parquet(
+                    file_path,
+                    compression=self.compression,
+                    index=False
+                )
+                logger.info(f"Saved snapshot for {symbol} at {timestamp}: {len(df)} new records, {len(combined_df)} total")
+                return file_path
+            except Exception as e:
+                logger.error(f"Failed to save snapshot for {symbol} at {timestamp}: {e}")
+                raise
     
     def load_snapshots(self, symbol: str, date_obj: date, 
                       start_time: Optional[datetime] = None, 
@@ -342,28 +401,30 @@ class ParquetStorage:
             return None
     
     def save_historical_archive(self, symbol: str, df: pd.DataFrame) -> Path:
-        """Save consolidated historical archive - replaces existing archive"""
+        """Save consolidated historical archive - replaces existing archive with file locking"""
         file_path = self._get_historical_path(symbol)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         
-        try:
-            # Add archive timestamp
-            if 'archive_date' not in df.columns:
-                df['archive_date'] = datetime.now()
-            
-            # Sort by date and contract details for efficient querying
-            df = df.sort_values(['date', 'expiration', 'strike', 'option_type'])
-            
-            df.to_parquet(
-                file_path,
-                compression=self.compression,
-                index=False
-            )
-            logger.info(f"Saved historical archive for {symbol}: {len(df)} records")
-            return file_path
-        except Exception as e:
-            logger.error(f"Failed to save historical archive for {symbol}: {e}")
-            raise
+        # Use file locking to prevent read corruption during write
+        with FileLock(file_path, timeout=30):
+            try:
+                # Add archive timestamp
+                if 'archive_date' not in df.columns:
+                    df['archive_date'] = datetime.now()
+                
+                # Sort by date and contract details for efficient querying
+                df = df.sort_values(['date', 'expiration', 'strike', 'option_type'])
+                
+                df.to_parquet(
+                    file_path,
+                    compression=self.compression,
+                    index=False
+                )
+                logger.info(f"Saved historical archive for {symbol}: {len(df)} records")
+                return file_path
+            except Exception as e:
+                logger.error(f"Failed to save historical archive for {symbol}: {e}")
+                raise
     
     def load_historical_archive(self, symbol: str, 
                                start_date: Optional[date] = None, 

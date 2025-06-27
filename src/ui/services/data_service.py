@@ -446,12 +446,12 @@ class DataService:
             
             return {
                 "symbol": symbol,
-                "date": target_date,
+                "date": str(target_date),  # Convert to string for Arrow compatibility
                 "snapshot_count": len(snapshots),
                 "unique_contracts": snapshots[['strike', 'option_type', 'expiration']].drop_duplicates().shape[0],
                 "time_range": (snapshot_times.min(), snapshot_times.max()),
-                "latest_snapshot": snapshot_times.max(),
-                "total_volume": snapshots['volume'].sum() if 'volume' in snapshots.columns else 0
+                "latest_snapshot": str(snapshot_times.max()) if pd.notna(snapshot_times.max()) else "N/A",  # Convert to string
+                "total_volume": int(snapshots['volume'].sum()) if 'volume' in snapshots.columns and pd.notna(snapshots['volume'].sum()) else 0
             }
         except Exception as e:
             logger.error(f"Error getting snapshot summary for {symbol}: {e}")

@@ -19,7 +19,8 @@ def render_sidebar() -> str:
             "Option Chain": "🔗",
             "Strategy Builder": "🏗️",
             "Analytics": "📈",
-            "Data Management": "💾"
+            "Data Management": "💾",
+            "Version Control": "🔄"
         }
         
         selected_page = st.radio(
@@ -37,8 +38,18 @@ def render_sidebar() -> str:
         # Get available symbols from data service
         data_service = st.session_state.get('data_service')
         if data_service:
-            available_symbols = data_service.get_available_symbols()
+            try:
+                available_symbols = data_service.get_available_symbols()
+                if not available_symbols:
+                    st.warning("⚠️ No symbols found in data service, using defaults")
+                    available_symbols = ['AAPL', 'SPY', 'TSLA']
+                else:
+                    st.success(f"✅ Loaded {len(available_symbols)} symbols")
+            except Exception as e:
+                st.error(f"❌ Error loading symbols: {e}")
+                available_symbols = ['AAPL', 'SPY', 'TSLA']
         else:
+            st.warning("⚠️ Data service not available, using default symbols")
             available_symbols = ['AAPL', 'SPY', 'TSLA']
         
         # Ensure we have a valid default selection
@@ -46,11 +57,15 @@ def render_sidebar() -> str:
         if 'AAPL' in available_symbols:
             default_index = available_symbols.index('AAPL')
         
+        # Debug info
+        st.caption(f"Available symbols: {', '.join(available_symbols)}")
+        
         selected_symbol = st.selectbox(
             "Select Symbol:",
             available_symbols,
             index=default_index,
-            key="symbol_selector"
+            key="symbol_selector",
+            help=f"Choose from {len(available_symbols)} available symbols"
         )
         
         # Note: selected_symbol is automatically managed by widget key
@@ -107,6 +122,7 @@ def render_sidebar() -> str:
             - **Strategy Builder**: Create and analyze strategies
             - **Analytics**: Advanced analysis tools
             - **Data Management**: Check data status and manage downloads
+            - **Version Control**: Automatic code and data versioning
             
             **About This Platform:**
             - **Local Desktop Application**: Runs on your computer only

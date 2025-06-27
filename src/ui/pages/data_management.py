@@ -7,7 +7,6 @@ Provides interface for managing dual workflow: real-time snapshots and historica
 import streamlit as st
 import pandas as pd
 import time
-import asyncio
 from datetime import datetime, date, timedelta
 from typing import Dict, Any, List
 
@@ -15,6 +14,7 @@ from ...services.async_data_service import async_data_service
 from ...services.snapshot_collector import snapshot_collector
 from ...services.historical_archiver import historical_archiver
 from ...utils.trading_calendar import trading_calendar
+from ...utils.async_adapter import run_async_safely, run_async_with_spinner
 
 
 def get_available_symbols() -> List[str]:
@@ -27,6 +27,154 @@ def get_available_symbols() -> List[str]:
             pass
     # Fallback to common symbols
     return ['AAPL', 'SPY', 'TSLA', 'QQQ', 'MSFT', 'GOOGL', 'AMZN', 'META']
+
+
+def display_test_results(result: Dict[str, Any]):
+    """Display comprehensive test collection results with automatic stopping and detailed reporting"""
+    
+    # Header with overall status
+    if result.get("success"):
+        st.success("🎉 **Test Collection Completed Successfully!**")
+        st.balloons()  # Celebration for successful test
+    else:
+        st.error("❌ **Test Collection Failed**")
+    
+    # Create expandable sections for detailed results
+    with st.expander("📊 **Test Summary**", expanded=True):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Status", 
+                "✅ SUCCESS" if result.get("success") else "❌ FAILED",
+                delta=None
+            )
+        
+        with col2:
+            contracts = result.get("contracts", 0)
+            st.metric("Contracts Collected", contracts)
+        
+        with col3:
+            total_time = result.get("total_test_time_seconds", 0)
+            st.metric("Total Time", f"{total_time:.2f}s")
+        
+        with col4:
+            connection_status = result.get("connection_status", "unknown")
+            st.metric("IB Connection", connection_status.upper())
+    
+    # Performance metrics
+    if "performance" in result and result["performance"]:
+        with st.expander("⚡ **Performance Metrics**"):
+            perf = result["performance"]
+            
+            perf_col1, perf_col2 = st.columns(2)
+            with perf_col1:
+                if "connection_time_seconds" in perf:
+                    st.metric("Connection Time", f"{perf['connection_time_seconds']:.2f}s")
+            
+            with perf_col2:
+                if "collection_time_seconds" in perf:
+                    st.metric("Data Collection Time", f"{perf['collection_time_seconds']:.2f}s")
+    
+    # Data quality analysis
+    if "data_quality" in result and result["data_quality"]:
+        with st.expander("🔍 **Data Quality Analysis**"):
+            quality = result["data_quality"]
+            
+            # Quality overview
+            qual_col1, qual_col2, qual_col3 = st.columns(3)
+            
+            with qual_col1:
+                st.metric("Call Contracts", quality.get("call_contracts", 0))
+                st.metric("Put Contracts", quality.get("put_contracts", 0))
+            
+            with qual_col2:
+                st.metric("Unique Expirations", quality.get("unique_expirations", 0))
+                st.metric("Unique Strikes", quality.get("unique_strikes", 0))
+            
+            with qual_col3:
+                completeness = quality.get("price_data_completeness", 0)
+                st.metric("Price Data Completeness", f"{completeness:.1f}%")
+                
+                # Color code completeness
+                if completeness >= 80:
+                    st.success("Excellent data quality")
+                elif completeness >= 60:
+                    st.warning("Good data quality")
+                else:
+                    st.error("Poor data quality")
+            
+            # Quality issues
+            if quality.get("issues"):
+                st.markdown("**⚠️ Data Quality Issues:**")
+                for issue in quality["issues"]:
+                    st.warning(f"• {issue}")
+    
+    # Errors and warnings
+    if result.get("errors") or result.get("warnings"):
+        with st.expander("⚠️ **Issues and Warnings**"):
+            if result.get("errors"):
+                st.markdown("**🔴 Errors:**")
+                for error in result["errors"]:
+                    st.error(f"• {error}")
+            
+            if result.get("warnings"):
+                st.markdown("**🟡 Warnings:**")
+                for warning in result["warnings"]:
+                    st.warning(f"• {warning}")
+    
+    # Technical details
+    with st.expander("🔧 **Technical Details**"):
+        tech_col1, tech_col2 = st.columns(2)
+        
+        with tech_col1:
+            st.write("**Test Parameters:**")
+            st.write(f"• Symbol: {result.get('symbol', 'Unknown')}")
+            st.write(f"• Start Time: {result.get('test_start_time', 'Unknown')}")
+            st.write(f"• End Time: {result.get('test_end_time', 'Unknown')}")
+        
+        with tech_col2:
+            st.write("**Collection Details:**")
+            st.write(f"• Timestamp: {result.get('timestamp', 'None')}")
+            st.write(f"• Connection Status: {result.get('connection_status', 'Unknown')}")
+            
+            if result.get("data_quality"):
+                vol_count = result["data_quality"].get("has_volume", 0)
+                st.write(f"• Contracts with Volume: {vol_count}")
+    
+    # Automatic result summary
+    st.markdown("---")
+    if result.get("success"):
+        st.success(
+            f"✅ **Test completed automatically!** "
+            f"Successfully collected {result.get('contracts', 0)} option contracts "
+            f"for {result.get('symbol', 'unknown symbol')} "
+            f"in {result.get('total_test_time_seconds', 0):.2f} seconds."
+        )
+        
+        # Provide next steps
+        st.info(
+            "💡 **Next Steps:**\n"
+            "• The test has automatically stopped and saved results\n"
+            "• Data is now available in the option chain viewer\n"
+            "• Check the 'Data Status' tab for more details\n"
+            "• Consider starting the full snapshot collection service if test was successful"
+        )
+    else:
+        st.error(
+            f"❌ **Test failed automatically.** "
+            f"Error: {result.get('error', 'Unknown error')}. "
+            f"Test duration: {result.get('total_test_time_seconds', 0):.2f} seconds."
+        )
+        
+        # Provide troubleshooting tips
+        st.info(
+            "🔧 **Troubleshooting Tips:**\n"
+            "• Ensure IB TWS is running and connected\n"
+            "• Check that API connections are enabled in TWS\n"
+            "• Verify delayed market data is configured\n"
+            "• Try during market hours for live data"
+        )
 
 
 def render():
@@ -640,7 +788,7 @@ def render_snapshot_management():
         st.metric("Market Hours", status["market_hours"])
     
     with config_col2:
-        st.metric("Next Collection", "Available" if status["next_collection_eligible"] else "Waiting")
+        st.metric("Next Collection", "Available" if status["should_collect_now"] else "Waiting")
         st.metric("IB Connection", "Connected" if status["ib_connected"] else "Disconnected")
     
     # Controls
@@ -667,16 +815,41 @@ def render_snapshot_management():
     with ctrl_col3:
         test_symbol = st.selectbox("Test Symbol", get_available_symbols(), key="test_snapshot_symbol")
         if st.button("🧪 Test Collection"):
-            with st.spinner(f"Testing snapshot collection for {test_symbol}..."):
-                try:
-                    # This would need to be adapted for Streamlit's sync context
-                    result = asyncio.run(snapshot_collector.collect_now(test_symbol))
-                    if result["success"]:
-                        st.success(f"✅ Test successful: {result['contracts']} contracts collected")
-                    else:
-                        st.error(f"❌ Test failed: {result.get('error', 'Unknown error')}")
-                except Exception as e:
-                    st.error(f"❌ Test error: {str(e)}")
+            try:
+                # Show initial status
+                status_placeholder = st.empty()
+                status_placeholder.info("🔄 Starting test collection...")
+                
+                # Run test with shorter timeout for UI responsiveness
+                result = run_async_with_spinner(
+                    snapshot_collector.collect_now(test_symbol),
+                    f"Testing snapshot collection for {test_symbol} (max 60s)..."
+                )
+                
+                # Clear status and show results
+                status_placeholder.empty()
+                
+                # Display comprehensive test results
+                display_test_results(result)
+                
+            except Exception as e:
+                st.error(f"❌ Test error: {str(e)}")
+                
+                # Show basic troubleshooting if test fails
+                with st.expander("🔧 Troubleshooting"):
+                    st.markdown("""
+                    **Common Issues:**
+                    - IB TWS not running or not connected
+                    - API connections disabled in TWS settings
+                    - Market data subscriptions not configured
+                    - Network connectivity issues
+                    
+                    **Quick Checks:**
+                    1. Ensure TWS is running on port 7497
+                    2. Enable API connections in TWS settings
+                    3. Configure delayed market data
+                    4. Try during market hours for better data
+                    """)
     
     # Recent snapshots summary
     st.markdown("#### 📊 Recent Snapshot Activity")
@@ -776,15 +949,17 @@ def render_historical_archiver():
     with archive_col3:
         if st.button("📥 Archive Symbol", key="archive_single"):
             if selected_symbol:
-                with st.spinner(f"Archiving historical data for {selected_symbol}..."):
-                    try:
-                        result = asyncio.run(historical_archiver.archive_symbol(selected_symbol))
-                        if result["success"]:
-                            st.success(f"✅ Archive successful: {result['records_downloaded']} new records")
-                        else:
-                            st.error(f"❌ Archive failed: {result.get('error', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"❌ Archive error: {str(e)}")
+                try:
+                    result = run_async_with_spinner(
+                        historical_archiver.archive_symbol(selected_symbol),
+                        f"Archiving historical data for {selected_symbol}..."
+                    )
+                    if result["success"]:
+                        st.success(f"✅ Archive successful: {result['records_downloaded']} new records")
+                    else:
+                        st.error(f"❌ Archive failed: {result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"❌ Archive error: {str(e)}")
     
     # Bulk archive operations
     st.markdown("##### Bulk Archive Operations")
@@ -797,26 +972,38 @@ def render_historical_archiver():
             get_available_symbols(),
             key="bulk_archive_symbols"
         )
+        # Debug info to show what's actually selected
+        if bulk_symbols:
+            st.info(f"✅ Selected: {len(bulk_symbols)} symbols - {', '.join(bulk_symbols)}")
+        else:
+            st.info("ℹ️ No symbols selected yet")
     
     with bulk_col2:
         st.markdown("")  # Spacing
-        st.markdown("")  # Spacing
+        
+        # Clear selection button
+        if st.button("🗑️ Clear Selection", key="clear_bulk_selection"):
+            st.session_state.bulk_archive_symbols = []
+            st.rerun()
+        
         if st.button("📥 Archive Selected", disabled=not bulk_symbols):
-            with st.spinner(f"Archiving {len(bulk_symbols)} symbols..."):
-                try:
-                    result = asyncio.run(historical_archiver.archive_multiple_symbols(bulk_symbols))
-                    
-                    # Show results
-                    st.success(f"✅ Bulk archive completed: {result['symbols_successful']}/{result['symbols_processed']} successful")
-                    st.info(f"📊 Total records downloaded: {result['total_records_downloaded']}")
-                    
-                    if result['errors']:
-                        st.error("❌ Some errors occurred:")
-                        for error in result['errors']:
-                            st.error(f"  • {error}")
-                    
-                except Exception as e:
-                    st.error(f"❌ Bulk archive error: {str(e)}")
+            try:
+                result = run_async_with_spinner(
+                    historical_archiver.archive_multiple_symbols(bulk_symbols),
+                    f"Archiving {len(bulk_symbols)} symbols..."
+                )
+                
+                # Show results
+                st.success(f"✅ Bulk archive completed: {result['symbols_successful']}/{result['symbols_processed']} successful")
+                st.info(f"📊 Total records downloaded: {result['total_records_downloaded']}")
+                
+                if result['errors']:
+                    st.error("❌ Some errors occurred:")
+                    for error in result['errors']:
+                        st.error(f"  • {error}")
+                
+            except Exception as e:
+                st.error(f"❌ Bulk archive error: {str(e)}")
 
 
 def render_data_status():

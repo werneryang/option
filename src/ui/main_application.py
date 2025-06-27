@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from src.ui.components.sidebar import render_sidebar
-from src.ui.pages import dashboard, option_chain, strategy_builder, analytics, data_management
+from src.ui.pages import dashboard, option_chain, strategy_builder, analytics, data_management, version_control
 from src.ui.services.data_service import DataService
 from src.utils.config import config
 
@@ -75,7 +75,16 @@ st.markdown("""
 def initialize_session_state():
     """Initialize session state variables - only non-widget variables"""
     if 'data_service' not in st.session_state:
-        st.session_state.data_service = DataService()
+        try:
+            st.session_state.data_service = DataService()
+            # Test that it works
+            symbols = st.session_state.data_service.get_available_symbols()
+            print(f"✅ DataService initialized with {len(symbols)} symbols: {symbols}")
+        except Exception as e:
+            print(f"❌ Error initializing DataService: {e}")
+            st.error(f"Failed to initialize data service: {e}")
+            # Set to None to trigger fallback behavior
+            st.session_state.data_service = None
     
     if 'current_strategy' not in st.session_state:
         st.session_state.current_strategy = None
@@ -108,6 +117,8 @@ def main():
         analytics.render()
     elif page == "Data Management":
         data_management.render()
+    elif page == "Version Control":
+        version_control.render()
     
     # Footer
     st.markdown("---")

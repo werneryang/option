@@ -2,18 +2,76 @@
 
 ## Overview
 
-The Options Analysis Platform uses a hybrid data storage architecture combining Parquet files for efficient analytical data storage and SQLite for metadata management. The system is designed for **historical analysis only** and avoids real-time market data subscriptions.
+The Options Analysis Platform uses a hybrid data storage architecture combining Parquet files for efficient analytical data storage and SQLite for metadata management. The system operates in **two modes**:
+
+1. **Real-time Snapshot Collection**: Automated 5-minute interval snapshots during market hours
+2. **Historical Data Analysis**: Manual archival and analysis of historical option data
+
+The platform collects delayed market data snapshots to avoid real-time market data subscription requirements.
 
 ## Data Storage Formats
 
 ### 1. Primary Data Storage (Parquet)
 
-#### Options Chain Data
+#### Real-time Snapshot Data
+- **Location**: `data/snapshots/{symbol}/{YYYY-MM-DD}/snapshots.parquet`
+- **Format**: Apache Parquet with configurable compression
+- **Schedule**: Every 5 minutes during market hours (9:45-16:45)
+- **Organization**: Hierarchical by symbol and date
+- **Purpose**: Capture intraday option price movements and volume changes
+
+#### Historical Archive Data
+- **Location**: `data/historical/{symbol}/historical_options.parquet`
+- **Format**: Apache Parquet with configurable compression
+- **Trigger**: Manual execution by user
+- **Scope**: Consolidated historical data from last archive to current date - 1 day
+- **Purpose**: Long-term historical analysis and backtesting
+
+#### Legacy Options Chain Data (Maintained for Compatibility)
 - **Location**: `data/processed/{symbol}/{date}/options.parquet`
 - **Format**: Apache Parquet with configurable compression
 - **Organization**: Hierarchical by symbol and date
 
-**Schema - Current Options Chain**:
+**Schema - Real-time Snapshot Data**:
+```python
+{
+    'symbol': str,              # Stock symbol (e.g., 'AAPL')
+    'snapshot_time': datetime,  # 5-minute snapshot timestamp
+    'expiration': str,          # Expiration date (YYYYMMDD format)
+    'strike': float,            # Strike price
+    'option_type': str,         # 'C' for Call, 'P' for Put
+    'bid': float,               # Current bid price (delayed)
+    'ask': float,               # Current ask price (delayed)
+    'last': float,              # Last traded price
+    'volume': int,              # Trading volume
+    'open_interest': int,       # Current open interest
+    'implied_volatility': float,# Current implied volatility
+    'delta': float,             # Current delta Greek
+    'gamma': float,             # Current gamma Greek
+    'theta': float,             # Current theta Greek
+    'vega': float,              # Current vega Greek
+    'collected_at': datetime    # System collection timestamp
+}
+```
+
+**Schema - Historical Archive Data**:
+```python
+{
+    'symbol': str,              # Stock symbol (e.g., 'AAPL')
+    'date': date,               # Trading date
+    'expiration': str,          # Expiration date (YYYYMMDD format)
+    'strike': float,            # Strike price
+    'option_type': str,         # 'C' for Call, 'P' for Put
+    'open': float,              # Opening price
+    'high': float,              # Daily high price
+    'low': float,               # Daily low price
+    'close': float,             # Closing price
+    'volume': int,              # Daily trading volume
+    'archive_date': datetime    # Date when archived
+}
+```
+
+**Schema - Legacy Options Chain Data**:
 ```python
 {
     'symbol': str,              # Stock symbol (e.g., 'AAPL')
@@ -88,11 +146,20 @@ The Options Analysis Platform uses a hybrid data storage architecture combining 
 
 ## Data Collection Parameters
 
-### Time Intervals
-- **Historical Data Duration**: 1 Month (`"1 M"`)
-- **Bar Size**: 1 Hour (`"1 hour"`)
+### Real-time Snapshot Collection
+- **Schedule**: Every 5 minutes during market hours
+- **Market Hours**: 9:45 AM - 4:45 PM EST (covers market open to close + settlement)
+- **Data Type**: Delayed option chain snapshots (bid, ask, last, Greeks)
+- **Storage**: Cumulative daily files per symbol
+- **Automation**: Runs automatically during market days
+
+### Historical Data Archival
+- **Trigger**: Manual execution by user
+- **Time Range**: From last archived date to current date - 1 day
+- **Historical Data Duration**: 1 Month (`"1 M"`) per request
+- **Bar Size**: Daily (`"1 day"`) for archival
 - **Trading Hours**: 9:30 AM - 4:00 PM EST
-- **Data Points**: Includes market close at 4:00 PM
+- **Data Points**: OHLC daily bars
 
 ### Expiration Date Targeting
 - **Selection Window**: Next 60 days from current date
@@ -125,7 +192,14 @@ IB TWS API → IBClient → Historical Data Request → Parquet Storage
 ### 2. Storage Organization
 ```
 data/
-├── processed/              # Primary analytical data
+├── snapshots/              # Real-time snapshot data (5-min intervals)
+│   └── {SYMBOL}/
+│       └── {YYYY-MM-DD}/
+│           └── snapshots.parquet  # Daily cumulative snapshots
+├── historical/             # Archived historical data
+│   └── {SYMBOL}/
+│       └── historical_options.parquet  # Consolidated historical archive
+├── processed/              # Legacy processed data (maintained for compatibility)
 │   └── {SYMBOL}/
 │       ├── prices.parquet  # Stock price history
 │       └── {YYYY-MM-DD}/

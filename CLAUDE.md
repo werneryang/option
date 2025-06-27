@@ -56,4 +56,36 @@
 
 - **Project Type**: Options Analysis Platform
 - **Tech Stack**: Python, Streamlit, SQLite, Parquet
-- **Focus**: Historical data analysis, NOT real-time trading
+- **Focus**: Real-time snapshot collection + Historical data analysis
+
+## Data Collection Workflow
+
+### 1. **Daily Snapshot Collection** (Automated)
+- **Schedule**: Every 5 minutes during market hours (9:45-16:45)
+- **Data Source**: Real-time option chain snapshots (delayed data)
+- **Storage**: Daily cumulative snapshot files
+- **File Format**: `data/snapshots/{symbol}/{YYYY-MM-DD}/snapshots.parquet`
+- **Purpose**: Capture intraday option price movements and volume changes
+
+### 2. **Historical Data Archival** (Manual)
+- **Trigger**: Manual execution by user
+- **Scope**: Download data from last archived date to current date - 1 day
+- **Storage**: Single historical archive files per symbol
+- **File Format**: `data/historical/{symbol}/historical_options.parquet`
+- **Purpose**: Long-term historical analysis and backtesting
+
+### 3. **Data Architecture**
+```
+data/
+├── snapshots/           # Real-time snapshot data (5-min intervals)
+│   └── {symbol}/
+│       └── {YYYY-MM-DD}/
+│           └── snapshots.parquet
+├── historical/          # Archived historical data
+│   └── {symbol}/
+│       └── historical_options.parquet
+└── processed/          # Legacy processed data (maintain for compatibility)
+    └── {symbol}/
+        └── {YYYY-MM-DD}/
+            └── options.parquet
+```

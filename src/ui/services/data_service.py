@@ -376,3 +376,112 @@ class DataService:
         """Clear internal cache"""
         self._cache.clear()
         logger.info("Data service cache cleared")
+    
+    # === NEW METHODS FOR DUAL WORKFLOW ===
+    
+    def get_snapshots(self, symbol: str, target_date: Optional[date] = None, 
+                     start_time: Optional[datetime] = None, 
+                     end_time: Optional[datetime] = None) -> Optional[pd.DataFrame]:
+        """Get snapshot data for a symbol and date with optional time filtering"""
+        if not symbol:
+            return None
+        try:
+            if target_date is None:
+                # Get most recent date with snapshot data
+                available_dates = self.storage.get_available_snapshot_dates(symbol)
+                if not available_dates:
+                    return None
+                target_date = max(available_dates)
+            
+            return self.storage.load_snapshots(symbol, target_date, start_time, end_time)
+        except Exception as e:
+            logger.error(f"Error loading snapshots for {symbol}: {e}")
+            return None
+    
+    def get_historical_archive(self, symbol: str, start_date: Optional[date] = None, 
+                              end_date: Optional[date] = None) -> Optional[pd.DataFrame]:
+        """Get historical archive data for a symbol with optional date filtering"""
+        if not symbol:
+            return None
+        try:
+            return self.storage.load_historical_archive(symbol, start_date, end_date)
+        except Exception as e:
+            logger.error(f"Error loading historical archive for {symbol}: {e}")
+            return None
+    
+    def get_available_snapshot_dates(self, symbol: str) -> List[date]:
+        """Get list of dates with available snapshot data"""
+        if not symbol:
+            return []
+        try:
+            return self.storage.get_available_snapshot_dates(symbol)
+        except Exception as e:
+            logger.error(f"Error getting available snapshot dates for {symbol}: {e}")
+            return []
+    
+    def get_last_archive_date(self, symbol: str) -> Optional[date]:
+        """Get the latest date in historical archive"""
+        if not symbol:
+            return None
+        try:
+            return self.storage.get_last_archive_date(symbol)
+        except Exception as e:
+            logger.error(f"Error getting last archive date for {symbol}: {e}")
+            return None
+    
+    def get_snapshot_summary(self, symbol: str, target_date: Optional[date] = None) -> Dict:
+        """Get summary statistics for snapshot data"""
+        try:
+            if target_date is None:
+                available_dates = self.get_available_snapshot_dates(symbol)
+                if not available_dates:
+                    return {"symbol": symbol, "snapshot_count": 0, "date_range": None}
+                target_date = max(available_dates)
+            
+            snapshots = self.get_snapshots(symbol, target_date)
+            if snapshots is None or len(snapshots) == 0:
+                return {"symbol": symbol, "snapshot_count": 0, "date_range": None}
+            
+            snapshot_times = pd.to_datetime(snapshots['snapshot_time'])
+            
+            return {
+                "symbol": symbol,
+                "date": target_date,
+                "snapshot_count": len(snapshots),
+                "unique_contracts": snapshots[['strike', 'option_type', 'expiration']].drop_duplicates().shape[0],
+                "time_range": (snapshot_times.min(), snapshot_times.max()),
+                "latest_snapshot": snapshot_times.max(),
+                "total_volume": snapshots['volume'].sum() if 'volume' in snapshots.columns else 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting snapshot summary for {symbol}: {e}")
+            return {"symbol": symbol, "snapshot_count": 0, "error": str(e)}
+    
+    def get_archive_summary(self, symbol: str) -> Dict:
+        """Get summary statistics for historical archive"""
+        try:
+            archive = self.get_historical_archive(symbol)
+            if archive is None or len(archive) == 0:
+                return {"symbol": symbol, "archive_records": 0, "date_range": None}
+            
+            dates = pd.to_datetime(archive['date']) if 'date' in archive.columns else pd.Series()
+            
+            return {
+                "symbol": symbol,
+                "archive_records": len(archive),
+                "unique_contracts": archive[['strike', 'option_type', 'expiration']].drop_duplicates().shape[0] if all(col in archive.columns for col in ['strike', 'option_type', 'expiration']) else 0,
+                "date_range": (dates.min().date(), dates.max().date()) if len(dates) > 0 else None,
+                "latest_archive_date": self.get_last_archive_date(symbol),
+                "total_volume": archive['volume'].sum() if 'volume' in archive.columns else 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting archive summary for {symbol}: {e}")
+            return {"symbol": symbol, "archive_records": 0, "error": str(e)}
+    
+    def cleanup_old_data(self, days_to_keep: int = None) -> Dict:
+        """Clean up old snapshot data beyond retention period"""
+        try:
+            return self.storage.cleanup_old_snapshots(days_to_keep)
+        except Exception as e:
+            logger.error(f"Error cleaning up old data: {e}")
+            return {"files_deleted": 0, "symbols_processed": 0, "error": str(e)}

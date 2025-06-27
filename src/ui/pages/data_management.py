@@ -1,16 +1,19 @@
 """
 Data Management Page
 
-Provides interface for checking and managing historical data downloads.
+Provides interface for managing dual workflow: real-time snapshots and historical archives.
 """
 
 import streamlit as st
 import pandas as pd
 import time
-from datetime import datetime
+import asyncio
+from datetime import datetime, date, timedelta
 from typing import Dict, Any, List
 
 from ...services.async_data_service import async_data_service
+from ...services.snapshot_collector import snapshot_collector
+from ...services.historical_archiver import historical_archiver
 from ...utils.trading_calendar import trading_calendar
 
 
@@ -27,25 +30,37 @@ def get_available_symbols() -> List[str]:
 
 
 def render():
-    """Render the data management page"""
+    """Render the data management page with dual workflow support"""
     
     st.header("📊 Data Management")
-    st.markdown("Check and manage historical options data for your symbols.")
+    st.markdown("Manage real-time snapshots and historical archives for comprehensive options analysis.")
     
     # Initialize and clean up session state
     cleanup_old_downloads()
     
     # Create tabs for different functions
-    tab1, tab2, tab3 = st.tabs(["🔍 Check Data", "📈 Download Status", "⚙️ Bulk Operations"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📸 Snapshot Collection", 
+        "📚 Historical Archive", 
+        "🔍 Data Status", 
+        "📈 Download Status", 
+        "⚙️ System Operations"
+    ])
     
     with tab1:
-        render_data_checker()
+        render_snapshot_management()
     
     with tab2:
-        render_download_status()
+        render_historical_archiver()
     
     with tab3:
-        render_bulk_operations()
+        render_data_status()
+    
+    with tab4:
+        render_download_status()
+    
+    with tab5:
+        render_system_operations()
 
 
 def cleanup_old_downloads():
@@ -583,3 +598,376 @@ def perform_bulk_download(symbols: List[str], force: bool = False):
         st.info("💡 Check the 'Download Status' tab to monitor progress.")
     else:
         st.warning("⚠️ No downloads were started.")
+
+
+# === NEW UI COMPONENTS FOR DUAL WORKFLOW ===
+
+def render_snapshot_management():
+    """Render snapshot collection management interface"""
+    st.markdown("### 📸 Real-time Snapshot Collection")
+    st.markdown("Automated collection of delayed option chain snapshots every 5 minutes during market hours.")
+    
+    # Get snapshot collector status
+    status = snapshot_collector.get_status()
+    
+    # Status display
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if status["is_running"]:
+            st.success("🟢 Collection Active")
+        else:
+            st.error("🔴 Collection Stopped")
+    
+    with col2:
+        if status["is_market_hours"]:
+            st.info("🕐 Market Hours")
+        else:
+            st.warning("🕐 After Hours")
+    
+    with col3:
+        if status["is_trading_day"]:
+            st.info("📅 Trading Day")
+        else:
+            st.warning("📅 Holiday/Weekend")
+    
+    # Configuration display
+    st.markdown("#### ⚙️ Collection Settings")
+    
+    config_col1, config_col2 = st.columns(2)
+    with config_col1:
+        st.metric("Collection Interval", f"{status['collection_interval']}")
+        st.metric("Market Hours", status["market_hours"])
+    
+    with config_col2:
+        st.metric("Next Collection", "Available" if status["next_collection_eligible"] else "Waiting")
+        st.metric("IB Connection", "Connected" if status["ib_connected"] else "Disconnected")
+    
+    # Controls
+    st.markdown("#### 🎛️ Collection Controls")
+    
+    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns(3)
+    
+    with ctrl_col1:
+        if st.button("▶️ Start Collection", disabled=status["is_running"]):
+            if snapshot_collector.start_collection():
+                st.success("✅ Snapshot collection started!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to start collection")
+    
+    with ctrl_col2:
+        if st.button("⏹️ Stop Collection", disabled=not status["is_running"]):
+            if snapshot_collector.stop_collection():
+                st.success("✅ Snapshot collection stopped!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to stop collection")
+    
+    with ctrl_col3:
+        test_symbol = st.selectbox("Test Symbol", get_available_symbols(), key="test_snapshot_symbol")
+        if st.button("🧪 Test Collection"):
+            with st.spinner(f"Testing snapshot collection for {test_symbol}..."):
+                try:
+                    # This would need to be adapted for Streamlit's sync context
+                    result = asyncio.run(snapshot_collector.collect_now(test_symbol))
+                    if result["success"]:
+                        st.success(f"✅ Test successful: {result['contracts']} contracts collected")
+                    else:
+                        st.error(f"❌ Test failed: {result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    st.error(f"❌ Test error: {str(e)}")
+    
+    # Recent snapshots summary
+    st.markdown("#### 📊 Recent Snapshot Activity")
+    
+    data_service = st.session_state.get('data_service')
+    if data_service:
+        try:
+            available_symbols = get_available_symbols()[:5]  # Show first 5 symbols
+            snapshot_summaries = []
+            
+            for symbol in available_symbols:
+                summary = data_service.get_snapshot_summary(symbol)
+                snapshot_summaries.append({
+                    "Symbol": symbol,
+                    "Date": summary.get("date", "N/A"),
+                    "Snapshots": summary.get("snapshot_count", 0),
+                    "Contracts": summary.get("unique_contracts", 0),
+                    "Latest": summary.get("latest_snapshot", "N/A"),
+                    "Volume": summary.get("total_volume", 0)
+                })
+            
+            if snapshot_summaries:
+                df = pd.DataFrame(snapshot_summaries)
+                st.dataframe(df, use_container_width=True)
+            else:
+                st.info("No snapshot data available yet")
+                
+        except Exception as e:
+            st.error(f"Error loading snapshot summary: {str(e)}")
+
+
+def render_historical_archiver():
+    """Render historical data archiver interface"""
+    st.markdown("### 📚 Historical Data Archive")
+    st.markdown("Download and consolidate historical option data for long-term analysis.")
+    
+    # Archive status overview
+    try:
+        all_status = historical_archiver.get_all_archive_status()
+        
+        if all_status:
+            st.markdown("#### 📊 Archive Status Overview")
+            
+            status_data = []
+            for symbol, status in all_status.items():
+                status_data.append({
+                    "Symbol": symbol,
+                    "Has Archive": "✅" if status.get("has_archive", False) else "❌",
+                    "Last Archive": status.get("last_archive_date", "Never"),
+                    "Records": status.get("archive_records", 0),
+                    "Days Behind": status.get("days_behind", 0),
+                    "Needs Update": "🔄" if status.get("needs_update", False) else "✅"
+                })
+            
+            df = pd.DataFrame(status_data)
+            st.dataframe(df, use_container_width=True)
+            
+            # Summary metrics
+            total_symbols = len(status_data)
+            needs_update = len([s for s in status_data if s["Needs Update"] == "🔄"])
+            has_archive = len([s for s in status_data if s["Has Archive"] == "✅"])
+            
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            with metric_col1:
+                st.metric("Total Symbols", total_symbols)
+            with metric_col2:
+                st.metric("Has Archive", has_archive)
+            with metric_col3:
+                st.metric("Needs Update", needs_update)
+        
+    except Exception as e:
+        st.error(f"Error loading archive status: {str(e)}")
+    
+    # Archive operations
+    st.markdown("#### 🔄 Archive Operations")
+    
+    # Single symbol archive
+    st.markdown("##### Single Symbol Archive")
+    
+    archive_col1, archive_col2, archive_col3 = st.columns(3)
+    
+    with archive_col1:
+        selected_symbol = st.selectbox("Select Symbol", get_available_symbols(), key="archive_symbol")
+    
+    with archive_col2:
+        # Show status for selected symbol
+        if selected_symbol:
+            try:
+                symbol_status = historical_archiver.get_archive_status(selected_symbol)
+                if symbol_status.get("needs_update", False):
+                    st.warning(f"📅 {symbol_status.get('days_behind', 0)} days behind")
+                else:
+                    st.success("✅ Up to date")
+            except:
+                st.info("Status unknown")
+    
+    with archive_col3:
+        if st.button("📥 Archive Symbol", key="archive_single"):
+            if selected_symbol:
+                with st.spinner(f"Archiving historical data for {selected_symbol}..."):
+                    try:
+                        result = asyncio.run(historical_archiver.archive_symbol(selected_symbol))
+                        if result["success"]:
+                            st.success(f"✅ Archive successful: {result['records_downloaded']} new records")
+                        else:
+                            st.error(f"❌ Archive failed: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Archive error: {str(e)}")
+    
+    # Bulk archive operations
+    st.markdown("##### Bulk Archive Operations")
+    
+    bulk_col1, bulk_col2 = st.columns(2)
+    
+    with bulk_col1:
+        bulk_symbols = st.multiselect(
+            "Select Symbols for Bulk Archive",
+            get_available_symbols(),
+            key="bulk_archive_symbols"
+        )
+    
+    with bulk_col2:
+        st.markdown("")  # Spacing
+        st.markdown("")  # Spacing
+        if st.button("📥 Archive Selected", disabled=not bulk_symbols):
+            with st.spinner(f"Archiving {len(bulk_symbols)} symbols..."):
+                try:
+                    result = asyncio.run(historical_archiver.archive_multiple_symbols(bulk_symbols))
+                    
+                    # Show results
+                    st.success(f"✅ Bulk archive completed: {result['symbols_successful']}/{result['symbols_processed']} successful")
+                    st.info(f"📊 Total records downloaded: {result['total_records_downloaded']}")
+                    
+                    if result['errors']:
+                        st.error("❌ Some errors occurred:")
+                        for error in result['errors']:
+                            st.error(f"  • {error}")
+                    
+                except Exception as e:
+                    st.error(f"❌ Bulk archive error: {str(e)}")
+
+
+def render_data_status():
+    """Render comprehensive data status overview"""
+    st.markdown("### 🔍 Data Status Overview")
+    st.markdown("View status of all data types: snapshots, archives, and legacy processed data.")
+    
+    data_service = st.session_state.get('data_service')
+    if not data_service:
+        st.error("Data service not available")
+        return
+    
+    # Get comprehensive data summary
+    try:
+        # Legacy data summary
+        legacy_summary = data_service.get_data_summary()
+        
+        st.markdown("#### 📊 Data Summary")
+        
+        summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+        
+        with summary_col1:
+            st.metric("Total Symbols", legacy_summary.get("total_symbols", 0))
+        
+        with summary_col2:
+            st.metric("Total Files", legacy_summary.get("total_files", 0))
+        
+        with summary_col3:
+            st.metric("Storage (MB)", f"{legacy_summary.get('total_size_mb', 0):.1f}")
+        
+        with summary_col4:
+            st.metric("Recent Downloads", legacy_summary.get("recent_downloads", 0))
+        
+        # Detailed symbol data
+        symbols = get_available_symbols()
+        
+        st.markdown("#### 📋 Symbol Data Status")
+        
+        status_data = []
+        for symbol in symbols:
+            try:
+                # Snapshot data
+                snapshot_summary = data_service.get_snapshot_summary(symbol)
+                
+                # Archive data
+                archive_summary = data_service.get_archive_summary(symbol)
+                
+                # Legacy data (option chain)
+                legacy_dates = data_service.get_available_option_dates(symbol)
+                
+                status_data.append({
+                    "Symbol": symbol,
+                    "Snapshots": snapshot_summary.get("snapshot_count", 0),
+                    "Snapshot Date": snapshot_summary.get("date", "N/A"),
+                    "Archive Records": archive_summary.get("archive_records", 0),
+                    "Archive Range": f"{archive_summary.get('date_range', [None, None])[0]} to {archive_summary.get('date_range', [None, None])[1]}" if archive_summary.get('date_range') else "N/A",
+                    "Legacy Dates": len(legacy_dates),
+                    "Latest Legacy": max(legacy_dates) if legacy_dates else "N/A"
+                })
+            except Exception as e:
+                status_data.append({
+                    "Symbol": symbol,
+                    "Snapshots": "Error",
+                    "Snapshot Date": "Error",
+                    "Archive Records": "Error", 
+                    "Archive Range": "Error",
+                    "Legacy Dates": "Error",
+                    "Latest Legacy": "Error"
+                })
+        
+        if status_data:
+            df = pd.DataFrame(status_data)
+            st.dataframe(df, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Error loading data status: {str(e)}")
+
+
+def render_system_operations():
+    """Render system maintenance and operations"""
+    st.markdown("### ⚙️ System Operations")
+    st.markdown("System maintenance, cleanup, and configuration operations.")
+    
+    # Data cleanup operations
+    st.markdown("#### 🧹 Data Cleanup")
+    
+    cleanup_col1, cleanup_col2 = st.columns(2)
+    
+    with cleanup_col1:
+        retention_days = st.number_input(
+            "Snapshot Retention (days)",
+            min_value=1,
+            max_value=365,
+            value=90,
+            help="Number of days to keep snapshot data"
+        )
+    
+    with cleanup_col2:
+        st.markdown("")  # Spacing
+        st.markdown("")  # Spacing
+        if st.button("🧹 Cleanup Old Snapshots"):
+            with st.spinner("Cleaning up old snapshot data..."):
+                try:
+                    data_service = st.session_state.get('data_service')
+                    if data_service:
+                        result = data_service.cleanup_old_data(retention_days)
+                        st.success(f"✅ Cleanup completed: {result['files_deleted']} files deleted from {result['symbols_processed']} symbols")
+                    else:
+                        st.error("Data service not available")
+                except Exception as e:
+                    st.error(f"❌ Cleanup error: {str(e)}")
+    
+    # Cache operations
+    st.markdown("#### 💾 Cache Management")
+    
+    cache_col1, cache_col2 = st.columns(2)
+    
+    with cache_col1:
+        st.info("Clear analytics cache to free memory and force recalculation of Greeks and other computed values.")
+    
+    with cache_col2:
+        if st.button("🗑️ Clear Cache"):
+            try:
+                data_service = st.session_state.get('data_service')
+                if data_service:
+                    data_service.clear_cache()
+                    st.success("✅ Cache cleared successfully")
+                else:
+                    st.error("Data service not available")
+            except Exception as e:
+                st.error(f"❌ Cache clear error: {str(e)}")
+    
+    # System status
+    st.markdown("#### 📊 System Status")
+    
+    try:
+        import psutil
+        
+        status_col1, status_col2, status_col3 = st.columns(3)
+        
+        with status_col1:
+            memory = psutil.virtual_memory()
+            st.metric("Memory Usage", f"{memory.percent:.1f}%")
+        
+        with status_col2:
+            disk = psutil.disk_usage('/')
+            st.metric("Disk Usage", f"{disk.percent:.1f}%")
+        
+        with status_col3:
+            cpu = psutil.cpu_percent(interval=1)
+            st.metric("CPU Usage", f"{cpu:.1f}%")
+    
+    except ImportError:
+        st.info("Install psutil for system monitoring: pip install psutil")

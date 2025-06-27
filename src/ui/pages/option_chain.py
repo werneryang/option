@@ -47,40 +47,73 @@ def render():
             st.caption(f"Latest: {max(available_dates)}")
     
     with col3:
-        # Historical mode toggle
-        historical_mode = st.checkbox(
-            "📊 Historical Analysis Mode", 
-            value=False,
-            help="Enable to analyze historical option chains and trends"
+        # Data source selection
+        data_source = st.selectbox(
+            "Data Source",
+            ["Legacy Processed", "Real-time Snapshots", "Historical Archive"],
+            help="Select data source type for analysis"
         )
     
-    # Date selection for historical mode
+    # Date/time selection based on data source
     target_date = None
-    if historical_mode and available_dates:
+    start_time = None
+    end_time = None
+    
+    if data_source == "Legacy Processed" and available_dates:
         st.markdown("#### Select Analysis Date")
         target_date = st.selectbox(
             "Target Date",
             options=sorted(available_dates, reverse=True),
-            help="Select date for historical option chain analysis"
+            help="Select date for legacy processed option chain analysis"
         )
+    
+    elif data_source == "Real-time Snapshots":
+        st.markdown("#### Select Snapshot Parameters")
         
-        # Date range for trend analysis
-        if len(available_dates) > 1:
-            col1, col2 = st.columns(2)
+        # Get available snapshot dates
+        snapshot_dates = data_service.get_available_snapshot_dates(selected_symbol)
+        
+        if snapshot_dates:
+            col1, col2, col3 = st.columns(3)
+            
             with col1:
-                start_date = st.selectbox(
-                    "Start Date (for trends)",
-                    options=sorted(available_dates),
-                    index=max(0, len(available_dates) - 7),  # Default to 7 days back
-                    help="Start date for historical trend analysis"
+                target_date = st.selectbox(
+                    "Snapshot Date",
+                    options=sorted(snapshot_dates, reverse=True),
+                    help="Select date for snapshot analysis"
                 )
+            
             with col2:
-                end_date = st.selectbox(
-                    "End Date (for trends)", 
-                    options=sorted(available_dates, reverse=True),
-                    index=0,  # Default to latest date
-                    help="End date for historical trend analysis"
+                start_time = st.time_input(
+                    "Start Time (optional)",
+                    value=None,
+                    help="Filter snapshots from this time"
                 )
+            
+            with col3:
+                end_time = st.time_input(
+                    "End Time (optional)", 
+                    value=None,
+                    help="Filter snapshots until this time"
+                )
+        else:
+            st.warning("No snapshot data available")
+            target_date = None
+    
+    elif data_source == "Historical Archive":
+        st.markdown("#### Select Archive Parameters")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            target_date = st.date_input(
+                "Filter Date (optional)",
+                value=None,
+                help="Filter archive data for specific date"
+            )
+        
+        with col2:
+            st.info("Historical archive contains consolidated data across all available dates")
     
     # Control panel
     st.markdown("### 🎛️ Filter Controls")
@@ -119,17 +152,49 @@ def render():
                 help="Filter options by days to expiration"
             )
     
-    # Load option chain (historical or current)
-    if historical_mode and target_date:
-        option_chain = data_service.get_option_chain(selected_symbol, target_date)
+    # Load data based on selected source
+    if data_source == "Legacy Processed":
+        if target_date:
+            option_chain = data_service.get_option_chain(selected_symbol, target_date)
+            data_date = target_date
+            data_source_path = f"data/processed/{selected_symbol}/{target_date}/options.parquet"
+            st.info(f"📅 Showing legacy processed data for {target_date}")
+        else:
+            option_chain = data_service.get_option_chain(selected_symbol)
+            available_dates = data_service.get_available_option_dates(selected_symbol)
+            data_date = max(available_dates) if available_dates else None
+            data_source_path = f"data/processed/{selected_symbol}/{data_date}/options.parquet" if data_date else "N/A"
+            st.info("📅 Showing latest available legacy processed data")
+    
+    elif data_source == "Real-time Snapshots":
+        if target_date:
+            option_chain = data_service.get_snapshots(selected_symbol, target_date, start_time, end_time)
+            data_date = target_date
+            data_source_path = f"data/snapshots/{selected_symbol}/{target_date}/snapshots.parquet"
+            time_filter = f" from {start_time} to {end_time}" if start_time or end_time else ""
+            st.info(f"📸 Showing snapshot data for {target_date}{time_filter}")
+        else:
+            option_chain = data_service.get_snapshots(selected_symbol)
+            available_dates = data_service.get_available_snapshot_dates(selected_symbol)
+            data_date = max(available_dates) if available_dates else None
+            data_source_path = f"data/snapshots/{selected_symbol}/{data_date}/snapshots.parquet" if data_date else "N/A"
+            st.info("📸 Showing latest available snapshot data")
+    
+    elif data_source == "Historical Archive":
+        start_date = target_date if target_date else None
+        end_date = target_date if target_date else None
+        option_chain = data_service.get_historical_archive(selected_symbol, start_date, end_date)
         data_date = target_date
-        st.info(f"📅 Showing option chain for {target_date}")
+        data_source_path = f"data/historical/{selected_symbol}/historical_options.parquet"
+        if target_date:
+            st.info(f"📚 Showing historical archive data for {target_date}")
+        else:
+            st.info("📚 Showing complete historical archive data")
+    
     else:
-        option_chain = data_service.get_option_chain(selected_symbol)
-        # Get the actual date used for the latest data
-        available_dates = data_service.get_available_option_dates(selected_symbol)
-        data_date = max(available_dates) if available_dates else None
-        st.info("📅 Showing latest available option chain")
+        option_chain = None
+        data_date = None
+        data_source_path = "Unknown"
     
     if option_chain is None or len(option_chain) == 0:
         st.warning(f"No option chain data available for {selected_symbol}")
@@ -168,11 +233,8 @@ def render():
     st.subheader("📊 Option Chain Data")
     
     # Display file path information
-    if data_date:
-        file_path = f"data/processed/{selected_symbol}/{data_date}/options.parquet"
-        st.info(f"📁 File path: {file_path}")
-    else:
-        st.info(f"📁 File path: Unable to determine data file path")
+    st.info(f"📁 File path: {data_source_path}")
+    st.info(f"📊 Data source: {data_source}")
     
     # Display all available columns without color rendering
     st.info(f"Available columns: {', '.join(display_data.columns.tolist())}")

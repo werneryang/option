@@ -15,11 +15,20 @@ class ParquetStorage:
         
         config.ensure_directories()
     
+    # Legacy processed data paths (maintained for compatibility)
     def _get_options_path(self, symbol: str, date_str: str) -> Path:
         return self.base_path / symbol / date_str / "options.parquet"
     
     def _get_prices_path(self, symbol: str) -> Path:
         return self.base_path / symbol / "prices.parquet"
+    
+    # New snapshot data paths
+    def _get_snapshots_path(self, symbol: str, date_str: str) -> Path:
+        return config.snapshots_data_path / symbol / date_str / "snapshots.parquet"
+    
+    # Historical archive data paths  
+    def _get_historical_path(self, symbol: str) -> Path:
+        return config.historical_data_path / symbol / "historical_options.parquet"
     
     def _get_cache_path(self, symbol: str, analysis_type: str) -> Path:
         cache_path = config.cache_data_path / symbol / analysis_type
@@ -263,5 +272,185 @@ class ParquetStorage:
         
         stats["total_size_mb"] = round(stats["total_size_mb"], 2)
         return stats
+
+    # === NEW METHODS FOR DUAL WORKFLOW ===
+    
+    def save_snapshot(self, symbol: str, timestamp: datetime, df: pd.DataFrame) -> Path:
+        """Save real-time option snapshot - appends to daily cumulative file"""
+        date_str = timestamp.strftime("%Y-%m-%d")
+        file_path = self._get_snapshots_path(symbol, date_str)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Add snapshot timestamp if not present
+            if 'snapshot_time' not in df.columns:
+                df['snapshot_time'] = timestamp
+            if 'collected_at' not in df.columns:
+                df['collected_at'] = datetime.now()
+            
+            # Append to existing file or create new one
+            if file_path.exists():
+                existing_df = pd.read_parquet(file_path)
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+                # Remove duplicates based on symbol, snapshot_time, strike, option_type
+                combined_df = combined_df.drop_duplicates(
+                    subset=['symbol', 'snapshot_time', 'strike', 'option_type'], 
+                    keep='last'
+                ).sort_values(['snapshot_time', 'strike', 'option_type'])
+            else:
+                combined_df = df.sort_values(['snapshot_time', 'strike', 'option_type'])
+            
+            combined_df.to_parquet(
+                file_path,
+                compression=self.compression,
+                index=False
+            )
+            logger.info(f"Saved snapshot for {symbol} at {timestamp}: {len(df)} new records, {len(combined_df)} total")
+            return file_path
+        except Exception as e:
+            logger.error(f"Failed to save snapshot for {symbol} at {timestamp}: {e}")
+            raise
+    
+    def load_snapshots(self, symbol: str, date_obj: date, 
+                      start_time: Optional[datetime] = None, 
+                      end_time: Optional[datetime] = None) -> Optional[pd.DataFrame]:
+        """Load snapshots for a specific date with optional time filtering"""
+        date_str = date_obj.strftime("%Y-%m-%d")
+        file_path = self._get_snapshots_path(symbol, date_str)
+        
+        if not file_path.exists():
+            logger.warning(f"Snapshot file not found: {file_path}")
+            return None
+        
+        try:
+            df = pd.read_parquet(file_path)
+            
+            # Convert snapshot_time to datetime if needed
+            if 'snapshot_time' in df.columns:
+                df['snapshot_time'] = pd.to_datetime(df['snapshot_time'])
+                
+                # Apply time filtering if specified
+                if start_time:
+                    df = df[df['snapshot_time'] >= start_time]
+                if end_time:
+                    df = df[df['snapshot_time'] <= end_time]
+            
+            logger.info(f"Loaded snapshots for {symbol} on {date_str}: {len(df)} records")
+            return df
+        except Exception as e:
+            logger.error(f"Failed to load snapshots for {symbol} on {date_str}: {e}")
+            return None
+    
+    def save_historical_archive(self, symbol: str, df: pd.DataFrame) -> Path:
+        """Save consolidated historical archive - replaces existing archive"""
+        file_path = self._get_historical_path(symbol)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Add archive timestamp
+            if 'archive_date' not in df.columns:
+                df['archive_date'] = datetime.now()
+            
+            # Sort by date and contract details for efficient querying
+            df = df.sort_values(['date', 'expiration', 'strike', 'option_type'])
+            
+            df.to_parquet(
+                file_path,
+                compression=self.compression,
+                index=False
+            )
+            logger.info(f"Saved historical archive for {symbol}: {len(df)} records")
+            return file_path
+        except Exception as e:
+            logger.error(f"Failed to save historical archive for {symbol}: {e}")
+            raise
+    
+    def load_historical_archive(self, symbol: str, 
+                               start_date: Optional[date] = None, 
+                               end_date: Optional[date] = None) -> Optional[pd.DataFrame]:
+        """Load historical archive with optional date filtering"""
+        file_path = self._get_historical_path(symbol)
+        
+        if not file_path.exists():
+            logger.warning(f"Historical archive not found: {file_path}")
+            return None
+        
+        try:
+            df = pd.read_parquet(file_path)
+            
+            # Convert date column if needed
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date']).dt.date
+                
+                # Apply date filtering if specified
+                if start_date:
+                    df = df[df['date'] >= start_date]
+                if end_date:
+                    df = df[df['date'] <= end_date]
+            
+            logger.info(f"Loaded historical archive for {symbol}: {len(df)} records")
+            return df
+        except Exception as e:
+            logger.error(f"Failed to load historical archive for {symbol}: {e}")
+            return None
+    
+    def get_available_snapshot_dates(self, symbol: str) -> List[date]:
+        """Get list of dates with available snapshot data"""
+        symbol_path = config.snapshots_data_path / symbol
+        if not symbol_path.exists():
+            return []
+        
+        dates = []
+        for date_dir in symbol_path.iterdir():
+            if date_dir.is_dir() and (date_dir / "snapshots.parquet").exists():
+                try:
+                    date_obj = datetime.strptime(date_dir.name, "%Y-%m-%d").date()
+                    dates.append(date_obj)
+                except ValueError:
+                    continue
+        
+        return sorted(dates)
+    
+    def get_last_archive_date(self, symbol: str) -> Optional[date]:
+        """Get the latest date in the historical archive"""
+        archive_df = self.load_historical_archive(symbol)
+        if archive_df is not None and len(archive_df) > 0 and 'date' in archive_df.columns:
+            return max(archive_df['date'])
+        return None
+    
+    def cleanup_old_snapshots(self, days_to_keep: int = None) -> Dict[str, int]:
+        """Clean up snapshot files older than specified days"""
+        days_to_keep = days_to_keep or config.snapshot_retention_days
+        cutoff_date = date.today() - timedelta(days=days_to_keep)
+        
+        cleanup_stats = {"files_deleted": 0, "symbols_processed": 0}
+        
+        snapshots_path = config.snapshots_data_path
+        if not snapshots_path.exists():
+            return cleanup_stats
+        
+        for symbol_dir in snapshots_path.iterdir():
+            if symbol_dir.is_dir():
+                cleanup_stats["symbols_processed"] += 1
+                for date_dir in symbol_dir.iterdir():
+                    if date_dir.is_dir():
+                        try:
+                            dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d").date()
+                            if dir_date < cutoff_date:
+                                snapshot_file = date_dir / "snapshots.parquet"
+                                if snapshot_file.exists():
+                                    snapshot_file.unlink()
+                                    cleanup_stats["files_deleted"] += 1
+                                    logger.info(f"Deleted old snapshot: {snapshot_file}")
+                                # Remove empty directory
+                                try:
+                                    date_dir.rmdir()
+                                except OSError:
+                                    pass  # Directory not empty
+                        except ValueError:
+                            continue
+        
+        logger.info(f"Snapshot cleanup completed: {cleanup_stats}")
+        return cleanup_stats
 
 storage = ParquetStorage()
